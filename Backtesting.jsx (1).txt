@@ -1,0 +1,296 @@
+import { useState, useMemo } from "react";
+
+function genCandles(count=200) {
+  let p = 1.0800;
+  return Array.from({length:count},(_,i)=>{
+    const o=p, m=(Math.random()-0.48)*0.0015;
+    const h=o+Math.random()*0.0008, l=o-Math.random()*0.0007, c=o+m;
+    p=c;
+    return{o,h:Math.max(h,o,c),l:Math.min(l,o,c),c,i};
+  });
+}
+
+function computeRSI(closes, period=14) {
+  if(closes.length<period+1) return 50;
+  let g=0,l=0;
+  for(let i=closes.length-period;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    if(d>0)g+=d; else l-=d;
+  }
+  const ag=g/period,al=l/period;
+  return al===0?100:100-100/(1+ag/al);
+}
+
+function runBacktest(candles, strategy, riskPct=1) {
+  const results=[], balance=[1000];
+  let cur=1000, wins=0, losses=0, maxDD=0, peak=1000;
+
+  for(let i=20;i<candles.length-1;i++){
+    const closes=candles.slice(0,i+1).map(c=>c.c);
+    const rsi=computeRSI(closes);
+    const c=candles[i], next=candles[i+1];
+    let signal=null;
+
+    if(strategy==="rsi"){
+      if(rsi<=30) signal="BUY";
+      if(rsi>=70) signal="SELL";
+    } else if(strategy==="macd"){
+      const ema12=closes.slice(-12).reduce((a,b)=>a+b,0)/12;
+      const ema26=closes.slice(-26).reduce((a,b)=>a+b,0)/26;
+      const macd=ema12-ema26;
+      const prev12=closes.slice(-13,-1).reduce((a,b)=>a+b,0)/12;
+      const prev26=closes.slice(-27,-1).reduce((a,b)=>a+b,0)/26;
+      const pmacd=prev12-prev26;
+      if(pmacd<0&&macd>0) signal="BUY";
+      if(pmacd>0&&macd<0) signal="SELL";
+    } else if(strategy==="combined"){
+      const ema9=closes.slice(-9).reduce((a,b)=>a+b,0)/9;
+      const ema21=closes.slice(-21).reduce((a,b)=>a+b,0)/21;
+      if(rsi<=35&&ema9>ema21) signal="BUY";
+      if(rsi>=65&&ema9<ema21) signal="SELL";
+    }
+
+    if(signal){
+      const entry=c.c;
+      const atr=Math.abs(c.h-c.l);
+      const sl=signal==="BUY"?entry-2*atr:entry+2*atr;
+      const tp=signal==="BUY"?entry+3*atr:entry-3*atr;
+      const exitPrice=next.c;
+      const won=signal==="BUY"?exitPrice>entry:exitPrice<entry;
+      const pnlPct=won?riskPct*1.5:-riskPct;
+      const pnl=cur*pnlPct/100;
+      cur+=pnl;
+      if(won) wins++; else losses++;
+      if(cur>peak) peak=cur;
+      const dd=((peak-cur)/peak)*100;
+      if(dd>maxDD) maxDD=dd;
+      balance.push(parseFloat(cur.toFixed(2)));
+      results.push({i,signal,entry,exit:exitPrice,pnl:parseFloat(pnl.toFixed(2)),won,balance:parseFloat(cur.toFixed(2))});
+    }
+  }
+  return{results,final:cur,wins,losses,maxDD,balance};
+}
+
+export default function Backtesting() {
+  const [instrument, setInstrument] = useState("EUR/USD");
+  const [strategy, setStrategy] = useState("rsi");
+  const [riskPct, setRiskPct] = useState("1");
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+  const [result, setResult] = useState(null);
+  const candles = useMemo(()=>genCandles(300),[]);
+
+  async function run() {
+    setRunning(true); setDone(false);
+    await new Promise(r=>setTimeout(r,1200));
+    const res = runBacktest(candles, strategy, parseFloat(riskPct)||1);
+    setResult(res); setRunning(false); setDone(true);
+  }
+
+  const INSTRUMENTS=["EUR/USD","GBP/USD","USD/ZAR","XAU/USD","Boom 1000","Crash 1000","SPY"];
+  const STRATEGIES=[
+    {v:"rsi",label:"RSI Strategy",desc:"Buy <30, Sell >70"},
+    {v:"macd",label:"MACD Crossover",desc:"Buy bullish cross, Sell bearish"},
+    {v:"combined",label:"Combined",desc:"RSI + EMA confluence"},
+  ];
+
+  const winRate = result ? Math.round((result.wins/(result.wins+result.losses))*100) : 0;
+  const totalTrades = result ? result.wins+result.losses : 0;
+  const totalPnlPct = result ? ((result.final-1000)/1000*100).toFixed(1) : 0;
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input[type=range]{accent-color:#00aaff}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.3s ease}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",maxWidth:480,margin:"0 auto",padding:"20px 16px"}}>
+
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:"#00aaff",letterSpacing:2,marginBottom:4}}>
+          SMONKIE TRADER
+        </div>
+        <div style={{fontSize:22,fontWeight:900,color:"#ddeeff",marginBottom:4}}>🔬 Backtesting</div>
+        <div style={{fontSize:12,color:"#334466",fontFamily:"monospace",marginBottom:24}}>
+          Test your strategy on historical data
+        </div>
+
+        {/* Setup */}
+        <div style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:10,padding:16,marginBottom:16}}>
+          <div style={{fontSize:11,color:"#334466",fontFamily:"monospace",letterSpacing:1,marginBottom:14}}>
+            BACKTEST SETTINGS
+          </div>
+
+          {/* Instrument */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:6}}>INSTRUMENT</div>
+            <div style={{display:"flex",gap:6,overflowX:"auto",scrollbarWidth:"none"}}>
+              {INSTRUMENTS.map(inst=>(
+                <button key={inst} onClick={()=>setInstrument(inst)} style={{
+                  background:instrument===inst?"#0044aa22":"#060d18",
+                  border:`1px solid ${instrument===inst?"#0044aa":"#0d1e32"}`,
+                  borderRadius:6,color:instrument===inst?"#00aaff":"#334466",
+                  padding:"5px 10px",fontSize:10,cursor:"pointer",
+                  fontFamily:"monospace",whiteSpace:"nowrap",flexShrink:0,
+                }}>{inst}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Strategy */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:6}}>STRATEGY</div>
+            {STRATEGIES.map(s=>(
+              <div key={s.v} onClick={()=>setStrategy(s.v)} style={{
+                display:"flex",gap:12,alignItems:"center",
+                background:strategy===s.v?"#0044aa15":"#060d18",
+                border:`1px solid ${strategy===s.v?"#0044aa44":"#0d1e32"}`,
+                borderRadius:8,padding:"10px 12px",marginBottom:8,cursor:"pointer",
+                transition:"all 0.2s",
+              }}>
+                <div style={{
+                  width:18,height:18,borderRadius:"50%",flexShrink:0,
+                  background:strategy===s.v?"#00aaff":"#060d18",
+                  border:`2px solid ${strategy===s.v?"#00aaff":"#1e3050"}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:10,color:"#000",
+                }}>{strategy===s.v?"✓":""}</div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:strategy===s.v?"#00aaff":"#aabbdd"}}>{s.label}</div>
+                  <div style={{fontSize:10,color:"#334466",fontFamily:"monospace"}}>{s.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Risk */}
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:5}}>
+              <span>RISK PER TRADE</span>
+              <span style={{color:"#00aaff"}}>{riskPct}%</span>
+            </div>
+            <input type="range" min="0.5" max="3" step="0.5" value={riskPct}
+              onChange={e=>setRiskPct(e.target.value)} style={{width:"100%"}}/>
+          </div>
+        </div>
+
+        {/* Run button */}
+        <button onClick={run} disabled={running} style={{
+          width:"100%",padding:"14px",
+          background:running?"#0a1628":"linear-gradient(135deg,#0044aa,#0066cc)",
+          border:"none",borderRadius:10,
+          color:running?"#334466":"#fff",fontSize:15,
+          cursor:running?"default":"pointer",
+          fontFamily:"'Rajdhani',sans-serif",fontWeight:700,
+          display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+          marginBottom:20,transition:"all 0.2s",
+        }}>
+          {running?(
+            <>
+              <span style={{width:16,height:16,borderRadius:"50%",border:"2px solid #334466",
+                borderTopColor:"#0088ff",animation:"spin 0.8s linear infinite",display:"inline-block"}}/>
+              Running backtest...
+            </>
+          ):"▶ Run Backtest"}
+        </button>
+
+        {/* Results */}
+        {done && result && (
+          <div className="fadein">
+            {/* Summary stats */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+              {[
+                {label:"Total Trades", val:totalTrades, color:"#aabbdd"},
+                {label:"Win Rate", val:`${winRate}%`, color:winRate>=60?"#00ff88":winRate>=50?"#ffcc00":"#ff4466"},
+                {label:"Total Return", val:`${parseFloat(totalPnlPct)>=0?"+":""}${totalPnlPct}%`, color:parseFloat(totalPnlPct)>=0?"#00ff88":"#ff4466"},
+                {label:"Max Drawdown", val:`-${result.maxDD.toFixed(1)}%`, color:result.maxDD<10?"#00ff88":result.maxDD<20?"#ffcc00":"#ff4466"},
+                {label:"Wins", val:result.wins, color:"#00ff88"},
+                {label:"Losses", val:result.losses, color:"#ff4466"},
+                {label:"Final Balance", val:`$${result.final.toFixed(0)}`, color:result.final>=1000?"#00ff88":"#ff4466"},
+                {label:"Profit", val:`$${(result.final-1000).toFixed(0)}`, color:result.final>=1000?"#00ff88":"#ff4466"},
+              ].map(s=>(
+                <div key={s.label} style={{background:"#080f1e",border:"1px solid #0d1e32",
+                  borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:9,color:"#334466",fontFamily:"monospace"}}>{s.label}</div>
+                  <div style={{fontSize:16,fontWeight:900,color:s.color,fontFamily:"monospace",marginTop:2}}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Equity curve */}
+            <div style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:10,padding:14,marginBottom:14}}>
+              <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",letterSpacing:1,marginBottom:10}}>
+                EQUITY CURVE
+              </div>
+              <svg width="100%" height="80" viewBox="0 0 400 80" style={{display:"block"}}>
+                <rect width="400" height="80" fill="#04080f" rx="4"/>
+                <line x1="0" y1="40" x2="400" y2="40" stroke="#0d1e32" strokeWidth="0.5" strokeDasharray="3,6"/>
+                {result.balance.length>1&&(()=>{
+                  const min=Math.min(...result.balance);
+                  const max=Math.max(...result.balance);
+                  const range=max-min||1;
+                  const pts=result.balance.map((v,i)=>
+                    `${(i/(result.balance.length-1))*400},${78-((v-min)/range)*72}`
+                  ).join(" ");
+                  const fillPts=`0,78 ${pts} 400,78`;
+                  return(
+                    <>
+                      <polygon points={fillPts} fill={result.final>=1000?"#00ff8818":"#ff446618"}/>
+                      <polyline points={pts} fill="none"
+                        stroke={result.final>=1000?"#00ff88":"#ff4466"} strokeWidth="2"/>
+                    </>
+                  );
+                })()}
+              </svg>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#334466",fontFamily:"monospace",marginTop:4}}>
+                <span>Start: $1,000</span>
+                <span style={{color:result.final>=1000?"#00ff88":"#ff4466"}}>End: ${result.final.toFixed(0)}</span>
+              </div>
+            </div>
+
+            {/* Last 10 trades */}
+            <div style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:10,padding:14}}>
+              <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",letterSpacing:1,marginBottom:10}}>
+                LAST 10 TRADES
+              </div>
+              {result.results.slice(-10).reverse().map((t,i)=>(
+                <div key={i} style={{
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"6px 0",borderBottom:"1px solid #060d18",
+                }}>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <span style={{
+                      fontSize:9,fontFamily:"monospace",padding:"2px 8px",
+                      borderRadius:4,
+                      background:t.won?"#00ff8815":"#ff446615",
+                      color:t.won?"#00ff88":"#ff4466",
+                      border:`1px solid ${t.won?"#00ff8833":"#ff446633"}`,
+                    }}>{t.signal}</span>
+                    <span style={{fontSize:11,color:"#667799",fontFamily:"monospace"}}>
+                      @{t.entry.toFixed(5)}
+                    </span>
+                  </div>
+                  <span style={{fontSize:12,fontFamily:"monospace",fontWeight:"bold",
+                    color:t.pnl>=0?"#00ff88":"#ff4466"}}>
+                    {t.pnl>=0?"+":""}{t.pnl>=0?"":""}{t.pnl.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",textAlign:"center",marginTop:20}}>
+          🐒 SMONKIE TRADER · ⚠ Backtest results do not guarantee future performance
+        </div>
+      </div>
+    </>
+  );
+}

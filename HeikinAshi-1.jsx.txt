@@ -1,0 +1,432 @@
+import { useState, useMemo } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  ORACLE TRADER — HEIKIN ASHI CHART
+//  Chart type selector: Candlestick, Heikin Ashi, Line, Area, Bar
+// ══════════════════════════════════════════════════════════════
+
+// ── HEIKIN ASHI CONVERTER ─────────────────────────────────────
+/**
+ * WHAT IS HEIKIN ASHI?
+ * Regular candlesticks show raw price (O,H,L,C).
+ * Heikin Ashi modifies each candle using averages of the
+ * previous candle — this smooths out noise and makes trends
+ * much easier to see.
+ *
+ * FORMULAS:
+ * HA Close  = (Open + High + Low + Close) / 4
+ * HA Open   = (Previous HA Open + Previous HA Close) / 2
+ * HA High   = Max(High, HA Open, HA Close)
+ * HA Low    = Min(Low,  HA Open, HA Close)
+ *
+ * HOW TO READ:
+ * - All green candles with no lower wick = STRONG UPTREND → HOLD BUY
+ * - All red candles with no upper wick   = STRONG DOWNTREND → HOLD SELL
+ * - Small body candles = trend slowing, possible reversal
+ * - Doji (cross shape) = trend change incoming
+ */
+export function toHeikinAshi(candles) {
+  if (!candles || candles.length === 0) return [];
+  const ha = [];
+  candles.forEach((c, i) => {
+    const haClose = (c.o + c.h + c.l + c.c) / 4;
+    const haOpen  = i === 0
+      ? (c.o + c.c) / 2
+      : (ha[i-1].o + ha[i-1].c) / 2;
+    const haHigh  = Math.max(c.h, haOpen, haClose);
+    const haLow   = Math.min(c.l, haOpen, haClose);
+    ha.push({ o:haOpen, h:haHigh, l:haLow, c:haClose });
+  });
+  return ha;
+}
+
+// ── CHART TYPE RENDERERS ──────────────────────────────────────
+
+function renderCandlesticks(candles, px, py, barW, data, spiked, color) {
+  return candles.map((c,i) => {
+    const x   = px(i);
+    const up  = c.c >= c.o;
+    const col = spiked && i===candles.length-1 ? "#9944ff"
+              : up ? "#00cc66" : "#ff3355";
+    const bT  = py(Math.max(c.o, c.c));
+    const bB  = py(Math.min(c.o, c.c));
+    return (
+      <g key={i}>
+        <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)}
+          stroke={col} strokeWidth="0.8"/>
+        <rect x={x-barW*.38} y={bT} width={barW*.76}
+          height={Math.max(bB-bT,1)}
+          fill={col+"55"} stroke={col} strokeWidth="0.8" rx="0.3"/>
+      </g>
+    );
+  });
+}
+
+function renderHeikinAshi(candles, px, py, barW, spiked) {
+  const ha = toHeikinAshi(candles);
+  return ha.map((c,i) => {
+    const x   = px(i);
+    const up  = c.c >= c.o;
+    // HA candles use solid fill — easier to read trend
+    const col = spiked && i===ha.length-1 ? "#9944ff"
+              : up ? "#00ff88" : "#ff4466";
+    const bT  = py(Math.max(c.o, c.c));
+    const bB  = py(Math.min(c.o, c.c));
+    return (
+      <g key={i}>
+        <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)}
+          stroke={col} strokeWidth="0.8"/>
+        <rect x={x-barW*.40} y={bT} width={barW*.80}
+          height={Math.max(bB-bT,1)}
+          fill={col} stroke={col} strokeWidth="0.5" rx="0.5"/>
+      </g>
+    );
+  });
+}
+
+function renderLine(candles, px, py, color) {
+  const pts = candles.map((c,i) => `${px(i)},${py(c.c)}`).join(" ");
+  return (
+    <polyline points={pts} fill="none"
+      stroke={color} strokeWidth="2" strokeLinejoin="round"/>
+  );
+}
+
+function renderArea(candles, px, py, color, chartH, PT) {
+  const pts = candles.map((c,i) => `${px(i)},${py(c.c)}`).join(" ");
+  const first = `${px(0)},${PT+chartH}`;
+  const last  = `${px(candles.length-1)},${PT+chartH}`;
+  return (
+    <>
+      <defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      <polygon points={`${first} ${pts} ${last}`}
+        fill="url(#areaGrad)"/>
+      <polyline points={pts} fill="none"
+        stroke={color} strokeWidth="2" strokeLinejoin="round"/>
+    </>
+  );
+}
+
+function renderBars(candles, px, py, barW, spiked) {
+  return candles.map((c,i) => {
+    const x   = px(i);
+    const up  = c.c >= c.o;
+    const col = spiked && i===candles.length-1 ? "#9944ff"
+              : up ? "#00cc66" : "#ff3355";
+    return (
+      <g key={i}>
+        {/* Vertical bar */}
+        <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)}
+          stroke={col} strokeWidth="1.2"/>
+        {/* Open tick (left) */}
+        <line x1={x-barW*.35} y1={py(c.o)} x2={x} y2={py(c.o)}
+          stroke={col} strokeWidth="1.2"/>
+        {/* Close tick (right) */}
+        <line x1={x} y1={py(c.c)} x2={x+barW*.35} y2={py(c.c)}
+          stroke={col} strokeWidth="1.2"/>
+      </g>
+    );
+  });
+}
+
+// ── RSI PANEL ─────────────────────────────────────────────────
+function computeRSIArr(candles, period=14) {
+  return candles.map((_,i) => {
+    if (i < period) return 50;
+    const sl = candles.slice(i-period, i+1).map(c=>c.c);
+    let g=0, l=0;
+    for (let j=1; j<sl.length; j++) {
+      const d=sl[j]-sl[j-1];
+      if (d>0) g+=d; else l-=d;
+    }
+    const ag=g/period, al=l/period;
+    return al===0 ? 100 : parseFloat((100-100/(1+ag/al)).toFixed(1));
+  });
+}
+
+// ── CHART TYPE CONFIG ─────────────────────────────────────────
+export const CHART_TYPES = [
+  {
+    id:    "candle",
+    label: "Candle",
+    icon:  "🕯",
+    desc:  "Standard candlestick chart. Shows raw OHLC price data.",
+  },
+  {
+    id:    "heikin",
+    label: "Heikin Ashi",
+    icon:  "📊",
+    desc:  "Smoothed candles. Better for spotting trends. No lower wick on green = strong uptrend.",
+  },
+  {
+    id:    "line",
+    label: "Line",
+    icon:  "📈",
+    desc:  "Simple line connecting close prices. Good for seeing overall direction.",
+  },
+  {
+    id:    "area",
+    label: "Area",
+    icon:  "🏔",
+    desc:  "Line chart with filled area. Good for long-term trend view.",
+  },
+  {
+    id:    "bar",
+    label: "Bar (OHLC)",
+    icon:  "⚊",
+    desc:  "Traditional OHLC bars. Left tick = open, right tick = close.",
+  },
+];
+
+// ── MAIN CHART COMPONENT ──────────────────────────────────────
+export default function HeikinAshiChart({
+  candles = [],
+  symbol  = "EUR/USD",
+  price   = 0,
+  pct     = 0,
+  type    = "FOREX",
+  spiked  = false,
+}) {
+  const [chartType, setChartType] = useState("candle");
+  const [showInfo,  setShowInfo]  = useState(false);
+
+  const W=380, CH=220, RH=50, PL=52, PR=8, PT=10;
+  const CW = W - PL - PR;
+
+  // Use HA candles for price range if in HA mode
+  const displayCandles = useMemo(() => {
+    if (chartType === "heikin") return toHeikinAshi(candles);
+    return candles;
+  }, [candles, chartType]);
+
+  const allP = displayCandles.flatMap(c=>[c.h,c.l]);
+  const minP = Math.min(...allP);
+  const maxP = Math.max(...allP);
+  const rng  = maxP-minP || 0.0001;
+
+  const barW = CW / candles.length;
+  const px   = i => PL + i*barW + barW/2;
+  const py   = v => PT + CH - ((v-minP)/rng)*CH;
+
+  const isFx  = type === "FOREX";
+  const fmt   = v => isFx ? parseFloat(v).toFixed(4) : parseFloat(v).toFixed(1);
+  const up    = pct >= 0;
+  const color = up ? "#00ff88" : "#ff4466";
+
+  const rsiArr  = computeRSIArr(candles);
+  const rsiPts  = rsiArr.map((v,i) =>
+    `${px(i)},${PT+CH+RH+4-((v/100)*(RH-4))}`
+  ).join(" ");
+  const lastRSI = rsiArr.at(-1);
+  const rsiCol  = lastRSI<=30?"#00ff88":lastRSI>=70?"#ff4466":"#cc77ff";
+
+  // HA trend description
+  const haTrend = useMemo(() => {
+    if (chartType !== "heikin") return null;
+    const ha = toHeikinAshi(candles);
+    const last5 = ha.slice(-5);
+    const allGreen = last5.every(c=>c.c>=c.o);
+    const allRed   = last5.every(c=>c.c<c.o);
+    const noLowerWick = last5.every(c=>Math.abs(c.l-Math.min(c.o,c.c))<0.0001);
+    const noUpperWick = last5.every(c=>Math.abs(c.h-Math.max(c.o,c.c))<0.0001);
+    if (allGreen && noLowerWick)
+      return {text:"STRONG UPTREND — No lower wicks", color:"#00ff88"};
+    if (allGreen)
+      return {text:"UPTREND — Bullish momentum", color:"#44cc88"};
+    if (allRed && noUpperWick)
+      return {text:"STRONG DOWNTREND — No upper wicks", color:"#ff4466"};
+    if (allRed)
+      return {text:"DOWNTREND — Bearish momentum", color:"#ff6644"};
+    return {text:"RANGING — Possible reversal", color:"#ffcc00"};
+  }, [candles, chartType]);
+
+  const totalH = PT+CH+RH+22;
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  const curY = py(price);
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",maxWidth:480,margin:"0 auto",padding:"16px"}}>
+
+        {/* Header */}
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,
+          color:"#9944ff",letterSpacing:2,marginBottom:4}}>ORACLE TRADER</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:900,color:"#ddeeff"}}>{symbol}</div>
+            <div style={{fontSize:22,fontFamily:"monospace",color,fontWeight:700}}>
+              {fmt(price)}
+              <span style={{fontSize:12,marginLeft:8}}>{up?"▲ +":"▼ "}{pct}%</span>
+            </div>
+          </div>
+          <button onClick={()=>setShowInfo(s=>!s)} style={{
+            background:"#080f1e",border:"1px solid #0d1e32",borderRadius:6,
+            color:"#334466",padding:"6px 12px",fontSize:11,cursor:"pointer",
+            fontFamily:"monospace",
+          }}>ℹ {chartType}</button>
+        </div>
+
+        {/* Chart type info */}
+        {showInfo && (
+          <div className="fadein" style={{background:"#080f1e",border:"1px solid #1a0a2e",
+            borderRadius:8,padding:12,marginBottom:12}}>
+            {CHART_TYPES.map(t=>(
+              <div key={t.id} style={{padding:"6px 0",borderBottom:"1px solid #060d18"}}>
+                <div style={{fontSize:12,fontWeight:700,color:chartType===t.id?"#9944ff":"#aabbdd"}}>
+                  {t.icon} {t.label} {chartType===t.id?"← Current":""}
+                </div>
+                <div style={{fontSize:11,color:"#334466",marginTop:2}}>{t.desc}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Chart type selector */}
+        <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",scrollbarWidth:"none"}}>
+          {CHART_TYPES.map(t=>(
+            <button key={t.id} onClick={()=>setChartType(t.id)} style={{
+              background:chartType===t.id?"#9944ff22":"#080f1e",
+              border:`1px solid ${chartType===t.id?"#9944ff88":"#0d1e32"}`,
+              borderRadius:8,color:chartType===t.id?"#cc77ff":"#334466",
+              fontSize:11,padding:"6px 12px",cursor:"pointer",
+              fontFamily:"monospace",flexShrink:0,whiteSpace:"nowrap",
+              transition:"all 0.2s",
+              display:"flex",alignItems:"center",gap:5,
+            }}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* HA trend banner */}
+        {haTrend && (
+          <div className="fadein" style={{
+            background:haTrend.color+"15",
+            border:`1px solid ${haTrend.color}44`,
+            borderRadius:8,padding:"8px 14px",marginBottom:10,
+            fontSize:12,color:haTrend.color,fontFamily:"monospace",
+            display:"flex",alignItems:"center",gap:8,
+          }}>
+            <span style={{fontSize:16}}>📊</span>
+            HA Signal: {haTrend.text}
+          </div>
+        )}
+
+        {/* SVG Chart */}
+        <div style={{background:"#06101c",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+          <svg width="100%" viewBox={`0 0 ${W} ${totalH}`} style={{display:"block"}}>
+            <defs>
+              <clipPath id="clip1">
+                <rect x={PL} y={PT} width={CW} height={CH}/>
+              </clipPath>
+            </defs>
+
+            {/* Chart background */}
+            <rect x={PL} y={PT} width={CW} height={CH} fill="#04080f" rx="2"/>
+
+            {/* Grid lines + price labels */}
+            {[0,.25,.5,.75,1].map((f,i)=>{
+              const pv=maxP-f*rng, yp=PT+f*CH;
+              return(
+                <g key={i}>
+                  <line x1={PL} y1={yp} x2={PL+CW} y2={yp}
+                    stroke="#0a1830" strokeWidth="0.5" strokeDasharray="3,6"/>
+                  <text x={PL-3} y={yp+3} textAnchor="end"
+                    fill="#223344" fontSize="7" fontFamily="monospace">
+                    {fmt(pv)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Candles/Chart */}
+            <g clipPath="url(#clip1)">
+              {chartType==="candle" && renderCandlesticks(candles,px,py,barW,null,spiked,color)}
+              {chartType==="heikin" && renderHeikinAshi(candles,px,py,barW,spiked)}
+              {chartType==="line"   && renderLine(displayCandles,px,py,color)}
+              {chartType==="area"   && renderArea(displayCandles,px,py,color,CH,PT)}
+              {chartType==="bar"    && renderBars(candles,px,py,barW,spiked)}
+            </g>
+
+            {/* Current price line */}
+            {price>0 && curY>PT && curY<PT+CH && (
+              <g>
+                <line x1={PL} y1={curY} x2={PL+CW} y2={curY}
+                  stroke={color} strokeWidth="0.7" strokeDasharray="2,4" opacity="0.9"/>
+                <rect x={PL+CW} y={curY-6} width={50} height={12}
+                  fill={color+"33"} rx="2"/>
+                <text x={PL+CW+2} y={curY+3} fill={color}
+                  fontSize="7" fontFamily="monospace">
+                  {fmt(price)}
+                </text>
+              </g>
+            )}
+
+            {/* RSI panel */}
+            <line x1={PL} y1={PT+CH+4} x2={PL+CW} y2={PT+CH+4}
+              stroke="#0d1e32" strokeWidth="1"/>
+            <rect x={PL} y={PT+CH+4} width={CW} height={RH}
+              fill="#030710" opacity="0.8"/>
+            <text x={PL-3} y={PT+CH+10} textAnchor="end"
+              fill="#334466" fontSize="6" fontFamily="monospace">RSI</text>
+            <line x1={PL} y1={PT+CH+4+RH*.3} x2={PL+CW} y2={PT+CH+4+RH*.3}
+              stroke="#ff446618" strokeWidth="0.5"/>
+            <line x1={PL} y1={PT+CH+4+RH*.7} x2={PL+CW} y2={PT+CH+4+RH*.7}
+              stroke="#00ff8818" strokeWidth="0.5"/>
+            <polyline points={rsiPts} fill="none"
+              stroke="#cc77ff" strokeWidth="1.2" opacity="0.9"/>
+            <text x={PL-3} y={PT+CH+RH} textAnchor="end"
+              fill={rsiCol} fontSize="7" fontFamily="monospace">{lastRSI}</text>
+          </svg>
+        </div>
+
+        {/* Heikin Ashi reading guide */}
+        {chartType==="heikin" && (
+          <div className="fadein" style={{background:"#080f1e",border:"1px solid #0d1e32",
+            borderRadius:10,padding:14,marginBottom:12}}>
+            <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",
+              letterSpacing:1,marginBottom:10}}>📊 HOW TO READ HEIKIN ASHI</div>
+            {[
+              {icon:"🟢",text:"All green, no lower wick",signal:"STRONG BUY — Stay in trade",color:"#00ff88"},
+              {icon:"🟢",text:"Green with lower wick",signal:"UPTREND but losing steam",color:"#44cc88"},
+              {icon:"⬜",text:"Small body / doji",signal:"REVERSAL POSSIBLE — Watch closely",color:"#ffcc00"},
+              {icon:"🔴",text:"Red with upper wick",signal:"DOWNTREND but losing steam",color:"#ff6644"},
+              {icon:"🔴",text:"All red, no upper wick",signal:"STRONG SELL — Stay in trade",color:"#ff4466"},
+            ].map((r,i)=>(
+              <div key={i} style={{display:"flex",gap:10,padding:"7px 0",
+                borderBottom:i<4?"1px solid #06101c":"none"}}>
+                <span style={{fontSize:14,flexShrink:0}}>{r.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,color:"#aabbdd"}}>{r.text}</div>
+                  <div style={{fontSize:11,color:r.color,fontFamily:"monospace",marginTop:2}}>
+                    → {r.signal}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",
+          textAlign:"center",marginTop:8}}>
+          🔮 ORACLE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,279 @@
+import { useState, useEffect } from "react";
+
+const SESSIONS = [
+  {
+    name:"Sydney", flag:"🇦🇺", color:"#00aaff",
+    utcOpen:22, utcClose:7,
+    pairs:["AUD/USD","NZD/USD","AUD/JPY"],
+    desc:"Low volatility. Mainly AUD and NZD pairs active.",
+  },
+  {
+    name:"Tokyo", flag:"🇯🇵", color:"#bb44ff",
+    utcOpen:0, utcClose:9,
+    pairs:["USD/JPY","EUR/JPY","AUD/JPY"],
+    desc:"Medium volatility. JPY pairs most active.",
+  },
+  {
+    name:"London", flag:"🇬🇧", color:"#00ff88",
+    utcOpen:8, utcClose:17,
+    pairs:["EUR/USD","GBP/USD","EUR/GBP","USD/CHF"],
+    desc:"HIGH volatility. Most liquid session. Best for scalping.",
+  },
+  {
+    name:"New York", flag:"🇺🇸", color:"#ffcc00",
+    utcOpen:13, utcClose:22,
+    pairs:["USD/CAD","USD/CHF","EUR/USD","USD/ZAR"],
+    desc:"HIGH volatility. Big moves. US economic data released.",
+  },
+];
+
+const OVERLAPS = [
+  {
+    name:"Tokyo–London Overlap",
+    utcOpen:8, utcClose:9,
+    color:"#44cc88",
+    desc:"Low activity. EUR/JPY can move.",
+  },
+  {
+    name:"London–New York Overlap",
+    utcOpen:13, utcClose:17,
+    color:"#ff9944",
+    desc:"HIGHEST volatility of the day. Best trading time.",
+  },
+];
+
+function getUTCHour() {
+  const now = new Date();
+  return now.getUTCHours() + now.getUTCMinutes()/60;
+}
+
+function isOpen(utcOpen, utcClose) {
+  const h = getUTCHour();
+  if (utcOpen < utcClose) return h >= utcOpen && h < utcClose;
+  return h >= utcOpen || h < utcClose;
+}
+
+function minsUntil(utcHour) {
+  const now = new Date();
+  const target = new Date();
+  target.setUTCHours(utcHour, 0, 0, 0);
+  if (target <= now) target.setUTCDate(target.getUTCDate()+1);
+  const diff = Math.round((target-now)/60000);
+  if (diff >= 60) return `${Math.floor(diff/60)}h ${diff%60}m`;
+  return `${diff}m`;
+}
+
+function progressInSession(open, close) {
+  const h = getUTCHour();
+  let duration = close > open ? close-open : 24-open+close;
+  let elapsed = h >= open ? h-open : 24-open+h;
+  if (elapsed < 0) elapsed = 0;
+  return Math.min(Math.round((elapsed/duration)*100), 100);
+}
+
+export default function MarketSessions() {
+  const [time, setTime] = useState(new Date());
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    const iv = setInterval(() => setTime(new Date()), 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const openSessions = SESSIONS.filter(s => isOpen(s.utcOpen, s.utcClose));
+  const openOverlaps = OVERLAPS.filter(o => isOpen(o.utcOpen, o.utcClose));
+  const utcH = getUTCHour();
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12,
+          color:"#00aaff", letterSpacing:2, marginBottom:4 }}>SMONKIE TRADER</div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>🌍 Market Sessions</div>
+        <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:20 }}>
+          UTC Time: {time.toUTCString().slice(17,22)} ·
+          Local: {time.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+        </div>
+
+        {/* Active overlap banner */}
+        {openOverlaps.map(o => (
+          <div key={o.name} style={{
+            background:o.color+"15", border:`1px solid ${o.color}44`,
+            borderRadius:8, padding:"10px 14px", marginBottom:12,
+            display:"flex", alignItems:"center", gap:10,
+          }}>
+            <div style={{ width:8, height:8, borderRadius:"50%",
+              background:o.color, animation:"pulse 1s infinite", flexShrink:0 }}/>
+            <div>
+              <div style={{ fontSize:13, color:o.color, fontWeight:700 }}>{o.name} ACTIVE</div>
+              <div style={{ fontSize:11, color:"#667799" }}>{o.desc}</div>
+            </div>
+          </div>
+        ))}
+
+        {/* 24-hour visual timeline */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:12 }}>24-HOUR SESSION MAP (UTC)</div>
+          <div style={{ position:"relative", height:60 }}>
+            {SESSIONS.map((s,i) => {
+              const yOffset = i*13;
+              const startPct = (s.utcOpen/24)*100;
+              const durH = s.utcClose > s.utcOpen ? s.utcClose-s.utcOpen : 24-s.utcOpen+s.utcClose;
+              const widthPct = (durH/24)*100;
+              const open = isOpen(s.utcOpen, s.utcClose);
+              return (
+                <div key={s.name} style={{ position:"absolute", top:yOffset,
+                  left:`${startPct}%`, width:`${widthPct}%`, height:11,
+                  background:open?s.color:s.color+"33",
+                  borderRadius:3, display:"flex", alignItems:"center",
+                  paddingLeft:4, overflow:"hidden",
+                }}>
+                  <span style={{ fontSize:7, color:open?"#fff":"#ffffff44",
+                    fontFamily:"monospace", whiteSpace:"nowrap" }}>{s.flag} {s.name}</span>
+                </div>
+              );
+            })}
+            {/* Current time indicator */}
+            <div style={{
+              position:"absolute", top:0, bottom:0,
+              left:`${(utcH/24)*100}%`,
+              width:2, background:"#fff",
+              borderRadius:1, opacity:0.8,
+            }}/>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between",
+            fontSize:8, color:"#1e3050", fontFamily:"monospace", marginTop:6 }}>
+            {[0,6,12,18,24].map(h => (
+              <span key={h}>{h.toString().padStart(2,"0")}:00</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Session cards */}
+        {SESSIONS.map(s => {
+          const open = isOpen(s.utcOpen, s.utcClose);
+          const progress = open ? progressInSession(s.utcOpen, s.utcClose) : 0;
+          const isSelected = selected===s.name;
+          return (
+            <div key={s.name} onClick={() => setSelected(isSelected?null:s.name)}
+              style={{
+                background: open ? s.color+"10" : "#080f1e",
+                border: `1px solid ${open ? s.color+"44" : "#0d1e32"}`,
+                borderRadius:10, padding:"14px", marginBottom:10,
+                cursor:"pointer", transition:"all 0.2s",
+              }}>
+              <div style={{ display:"flex", justifyContent:"space-between",
+                alignItems:"flex-start", marginBottom:8 }}>
+                <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                  <span style={{ fontSize:22 }}>{s.flag}</span>
+                  <div>
+                    <div style={{ fontSize:15, fontWeight:700,
+                      color: open ? s.color : "#667799" }}>{s.name}</div>
+                    <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>
+                      {String(s.utcOpen).padStart(2,"0")}:00 – {String(s.utcClose).padStart(2,"0")}:00 UTC
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{
+                    background: open ? s.color+"22" : "#0d1e32",
+                    border: `1px solid ${open ? s.color+"55" : "#1e3050"}`,
+                    borderRadius:4, padding:"3px 10px",
+                    fontSize:11, color: open ? s.color : "#334466",
+                    fontFamily:"monospace", fontWeight:"bold",
+                    display:"flex", alignItems:"center", gap:5,
+                  }}>
+                    {open && <div style={{ width:5, height:5, borderRadius:"50%",
+                      background:s.color, animation:"pulse 2s infinite" }}/>}
+                    {open ? "OPEN" : `Opens in ${minsUntil(s.utcOpen)}`}
+                  </div>
+                </div>
+              </div>
+
+              {open && (
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between",
+                    fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:3 }}>
+                    <span>Session Progress</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div style={{ height:3, background:"#0d1e32", borderRadius:2, overflow:"hidden" }}>
+                    <div style={{ width:`${progress}%`, height:"100%",
+                      background:s.color, borderRadius:2, transition:"width 0.5s" }}/>
+                  </div>
+                </div>
+              )}
+
+              {isSelected && (
+                <div className="fadein">
+                  <div style={{ fontSize:12, color:"#667799", marginBottom:8, lineHeight:1.6 }}>
+                    {s.desc}
+                  </div>
+                  <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+                    marginBottom:5 }}>ACTIVE PAIRS</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    {s.pairs.map(p => (
+                      <span key={p} style={{
+                        background:s.color+"15", border:`1px solid ${s.color}33`,
+                        borderRadius:4, padding:"3px 10px",
+                        fontSize:11, color:s.color, fontFamily:"monospace",
+                      }}>{p}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Overlap info */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:12 }}>SESSION OVERLAPS</div>
+          {OVERLAPS.map(o => {
+            const active = isOpen(o.utcOpen, o.utcClose);
+            return (
+              <div key={o.name} style={{ padding:"10px 0",
+                borderBottom:"1px solid #06101c" }}>
+                <div style={{ display:"flex", justifyContent:"space-between",
+                  alignItems:"center", marginBottom:3 }}>
+                  <span style={{ fontSize:13, fontWeight:700,
+                    color:active?o.color:"#667799" }}>{o.name}</span>
+                  {active && (
+                    <span style={{ fontSize:9, color:o.color, fontFamily:"monospace",
+                      background:o.color+"15", border:`1px solid ${o.color}33`,
+                      borderRadius:4, padding:"1px 8px" }}>ACTIVE</span>
+                  )}
+                </div>
+                <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>
+                  {String(o.utcOpen).padStart(2,"0")}:00 – {String(o.utcClose).padStart(2,"0")}:00 UTC
+                </div>
+                <div style={{ fontSize:11, color:"#667799", marginTop:3 }}>{o.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+          textAlign:"center", marginTop:20 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

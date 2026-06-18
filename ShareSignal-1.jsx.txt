@@ -1,0 +1,221 @@
+import { useState, useRef } from "react";
+
+export default function ShareSignal({ signal }) {
+  const defaultSignal = signal || {
+    sym:"EUR/USD", type:"FOREX", signal:"STRONG BUY",
+    price:1.0842, entry:1.0842, sl:1.0820, tp:1.0884,
+    rsi:28.4, rr:"1:2", bias:"BULLISH", strength:"STRONG",
+    note:"RSI Oversold + MACD Bullish Crossover",
+    time: new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),
+    date: new Date().toLocaleDateString(),
+  };
+
+  const [s, setS] = useState(defaultSignal);
+  const [copied, setCopied] = useState(false);
+  const [theme, setTheme] = useState("dark");
+
+  const isBuy = s.signal.includes("BUY");
+  const sigColor = isBuy ? "#00ff88" : "#ff4466";
+  const bgColor = theme==="dark" ? "#060d18" : "#0a1628";
+  const cardBg = theme==="dark" ? "#080f1e" : "#0d1e38";
+
+  function copyText() {
+    const text = `🐒 SMONKIE TRADER SIGNAL\n━━━━━━━━━━━━━━━━━\n${isBuy?"🟢":"🔴"} ${s.signal} — ${s.sym}\n━━━━━━━━━━━━━━━━━\n💰 Price:       ${s.price}\n🎯 Entry:       ${s.entry}\n🛑 Stop Loss:   ${s.sl}\n✅ Take Profit: ${s.tp}\n📊 RSI:         ${s.rsi}\n⚖ R/R Ratio:   ${s.rr}\n💡 Reason:      ${s.note}\n🕐 Time:        ${s.time} · ${s.date}\n━━━━━━━━━━━━━━━━━\n⚠ Not financial advice\n🔗 smonkietrader.com`;
+    navigator.clipboard.writeText(text).then(()=>{
+      setCopied(true); setTimeout(()=>setCopied(false),2000);
+    });
+  }
+
+  function shareWhatsApp() {
+    const text = encodeURIComponent(`🐒 *SMONKIE SIGNAL*\n${isBuy?"🟢":"🔴"} *${s.signal} — ${s.sym}*\n\n💰 Price: ${s.price}\n🎯 Entry: ${s.entry}\n🛑 SL: ${s.sl}\n✅ TP: ${s.tp}\n📊 RSI: ${s.rsi}\n⚖ R/R: ${s.rr}\n\n💡 ${s.note}\n\n⚠ Not financial advice\nPowered by SMONKIE TRADER`);
+    window.open(`https://wa.me/?text=${text}`,"_blank");
+  }
+
+  function shareTelegram() {
+    const text = encodeURIComponent(`🐒 SMONKIE SIGNAL\n${isBuy?"🟢":"🔴"} ${s.signal} — ${s.sym}\n💰 ${s.price} | Entry: ${s.entry} | SL: ${s.sl} | TP: ${s.tp}\n📊 RSI: ${s.rsi} | R/R: ${s.rr}\n💡 ${s.note}\n⚠ Not financial advice`);
+    window.open(`https://t.me/share/url?text=${text}`,"_blank");
+  }
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input,select{outline:none}
+    input:focus,select:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+    select option{background:#080f1e}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12, color:"#00aaff", letterSpacing:2, marginBottom:4 }}>
+          SMONKIE TRADER
+        </div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>📤 Share Signal</div>
+        <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:24 }}>
+          Generate and share your trade setup
+        </div>
+
+        {/* Signal card preview */}
+        <div style={{
+          background: cardBg,
+          border:`2px solid ${sigColor}44`,
+          borderRadius:16, padding:20, marginBottom:20,
+          boxShadow:`0 0 40px ${sigColor}18`,
+          position:"relative", overflow:"hidden",
+        }}>
+          {/* Watermark */}
+          <div style={{ position:"absolute", top:12, right:12,
+            fontSize:20, opacity:0.15 }}>🐒</div>
+
+          {/* Header */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+            <div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{
+                  background:sigColor+"22", border:`1px solid ${sigColor}55`,
+                  borderRadius:6, padding:"4px 12px",
+                  fontSize:14, color:sigColor, fontFamily:"monospace", fontWeight:"bold",
+                }}>
+                  {isBuy?"🟢":"🔴"} {s.signal}
+                </div>
+              </div>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginTop:8 }}>{s.sym}</div>
+              <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>{s.type}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontSize:20, fontFamily:"monospace", color:sigColor, fontWeight:900 }}>{s.price}</div>
+              <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>{s.date} {s.time}</div>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{ height:1, background:`linear-gradient(90deg,${sigColor}33,transparent)`, marginBottom:14 }}/>
+
+          {/* Trade levels */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:14 }}>
+            {[
+              { label:"ENTRY", val:s.entry, color:"#00aaff" },
+              { label:"STOP LOSS", val:s.sl, color:"#ff4466" },
+              { label:"TAKE PROFIT", val:s.tp, color:"#00ff88" },
+            ].map(({label,val,color})=>(
+              <div key={label} style={{ background:"#06101c", borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+                <div style={{ fontSize:8, color:"#334466", fontFamily:"monospace", marginBottom:3 }}>{label}</div>
+                <div style={{ fontSize:12, color, fontFamily:"monospace", fontWeight:"bold" }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display:"flex", justifyContent:"space-around", marginBottom:14 }}>
+            {[
+              { label:"RSI", val:s.rsi, color:s.rsi<=30?"#00ff88":s.rsi>=70?"#ff4466":"#ffcc00" },
+              { label:"R/R", val:s.rr, color:"#00aaff" },
+              { label:"BIAS", val:s.bias, color:s.bias==="BULLISH"?"#00ff88":"#ff4466" },
+              { label:"STRENGTH", val:s.strength, color:sigColor },
+            ].map(({label,val,color})=>(
+              <div key={label} style={{ textAlign:"center" }}>
+                <div style={{ fontSize:8, color:"#334466", fontFamily:"monospace" }}>{label}</div>
+                <div style={{ fontSize:11, color, fontFamily:"monospace", fontWeight:"bold", marginTop:2 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Reason */}
+          <div style={{ background:"#04080f", borderRadius:6, padding:"8px 12px",
+            fontSize:11, color:"#667799", fontFamily:"monospace", marginBottom:14,
+            borderLeft:`2px solid ${sigColor}44` }}>
+            → {s.note}
+          </div>
+
+          {/* Footer */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:10,
+              color:"#334466", letterSpacing:1 }}>🐒 SMONKIE TRADER</div>
+            <div style={{ fontSize:9, color:"#1e3050", fontFamily:"monospace" }}>
+              ⚠ NOT FINANCIAL ADVICE
+            </div>
+          </div>
+        </div>
+
+        {/* Share buttons */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+          <button onClick={shareWhatsApp} style={{
+            background:"#25D36615", border:"1px solid #25D36633",
+            borderRadius:10, color:"#25D366", padding:"14px",
+            fontSize:14, cursor:"pointer", fontFamily:"'Rajdhani',sans-serif",
+            fontWeight:700, display:"flex", alignItems:"center",
+            justifyContent:"center", gap:8,
+          }}>
+            <span style={{ fontSize:18 }}>📱</span> WhatsApp
+          </button>
+          <button onClick={shareTelegram} style={{
+            background:"#0088cc15", border:"1px solid #0088cc33",
+            borderRadius:10, color:"#0088cc", padding:"14px",
+            fontSize:14, cursor:"pointer", fontFamily:"'Rajdhani',sans-serif",
+            fontWeight:700, display:"flex", alignItems:"center",
+            justifyContent:"center", gap:8,
+          }}>
+            <span style={{ fontSize:18 }}>✈</span> Telegram
+          </button>
+        </div>
+
+        <button onClick={copyText} style={{
+          width:"100%",
+          background: copied?"#00ff8815":"#080f1e",
+          border:`1px solid ${copied?"#00ff88":"#0d1e32"}`,
+          borderRadius:10, color:copied?"#00ff88":"#aabbdd",
+          padding:"13px", fontSize:14, cursor:"pointer",
+          fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+          transition:"all 0.2s", marginBottom:20,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+        }}>
+          {copied ? "✓ Copied to clipboard!" : "📋 Copy as Text"}
+        </button>
+
+        {/* Edit signal */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:16 }}>
+          <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", letterSpacing:1, marginBottom:14 }}>
+            EDIT SIGNAL
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            {[
+              { label:"SYMBOL", field:"sym", type:"text" },
+              { label:"PRICE", field:"price", type:"number" },
+              { label:"ENTRY", field:"entry", type:"number" },
+              { label:"STOP LOSS", field:"sl", type:"number" },
+              { label:"TAKE PROFIT", field:"tp", type:"number" },
+              { label:"RSI", field:"rsi", type:"number" },
+            ].map(({label,field,type})=>(
+              <div key={field}>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>{label}</div>
+                <input type={type} value={s[field]}
+                  onChange={e=>setS(p=>({...p,[field]:type==="number"?parseFloat(e.target.value)||0:e.target.value}))}
+                  style={{ width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+                    borderRadius:6, color:"#aabbd0", padding:"8px 10px",
+                    fontSize:12, fontFamily:"monospace", outline:"none" }}/>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop:10 }}>
+            <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>SIGNAL TYPE</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {["BUY","SELL","STRONG BUY","STRONG SELL","HOLD"].map(sig=>(
+                <button key={sig} onClick={()=>setS(p=>({...p,signal:sig}))} style={{
+                  padding:"5px 10px", borderRadius:20, fontSize:10, cursor:"pointer",
+                  background: s.signal===sig?"#0044aa22":"#060d18",
+                  border:`1px solid ${s.signal===sig?"#0044aa":"#0d1e32"}`,
+                  color: s.signal===sig?"#00aaff":"#334466", fontFamily:"monospace",
+                }}>{sig}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

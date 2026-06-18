@@ -1,0 +1,334 @@
+import { useState, useMemo } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  ORACLE TRADER — VOLUME PROFILE
+//  Shows where most volume traded at each price level.
+//  Reveals strongest support and resistance zones automatically.
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * WHAT IS VOLUME PROFILE?
+ * Instead of showing volume as bars at the bottom (time-based),
+ * Volume Profile shows volume as horizontal bars on the RIGHT
+ * side of the chart — stacked by PRICE LEVEL.
+ *
+ * KEY CONCEPTS:
+ * - POC  (Point of Control) = price level with MOST volume traded
+ *        This is the strongest magnet — price keeps returning here
+ * - VAH  (Value Area High) = upper boundary of 70% of all volume
+ * - VAL  (Value Area Low)  = lower boundary of 70% of all volume
+ * - HVN  (High Volume Node) = price levels with lots of volume = SUPPORT/RESISTANCE
+ * - LVN  (Low Volume Node)  = price levels with little volume = price moves fast through here
+ *
+ * HOW TRADERS USE IT:
+ * - Buy near VAL (value area low) = bargain zone
+ * - Sell near VAH (value area high) = expensive zone
+ * - POC = strongest magnet — price always pulls back to it
+ * - LVN below current price = strong support (few sellers there)
+ * - HVN above current price = strong resistance (many sellers there)
+ */
+
+function generateVolumeProfile(candles, levels = 24) {
+  if (!candles || candles.length === 0) return { bins:[], poc:0, vah:0, val:0 };
+
+  const allPrices = candles.flatMap(c => [c.h, c.l]);
+  const minP = Math.min(...allPrices);
+  const maxP = Math.max(...allPrices);
+  const step = (maxP - minP) / levels;
+
+  // Build bins
+  const bins = Array.from({ length: levels }, (_, i) => ({
+    priceMin: minP + i * step,
+    priceMax: minP + (i+1) * step,
+    priceMid: minP + (i + 0.5) * step,
+    volume:   0,
+  }));
+
+  // Distribute candle volume across price bins it covers
+  candles.forEach(c => {
+    const vol = c.v || (Math.random() * 100 + 20); // use volume or simulate
+    bins.forEach(bin => {
+      // How much of this candle's range overlaps this bin?
+      const overlap = Math.max(0,
+        Math.min(c.h, bin.priceMax) - Math.max(c.l, bin.priceMin)
+      );
+      const candleRange = c.h - c.l || 0.0001;
+      bin.volume += vol * (overlap / candleRange);
+    });
+  });
+
+  const totalVol = bins.reduce((a, b) => a + b.volume, 0);
+
+  // Find POC (max volume bin)
+  const poc = bins.reduce((a, b) => b.volume > a.volume ? b : a).priceMid;
+
+  // Value Area = 70% of total volume around POC
+  const sorted = [...bins].sort((a, b) => b.volume - a.volume);
+  let cumVol = 0, vaSet = new Set();
+  for (const bin of sorted) {
+    cumVol += bin.volume;
+    vaSet.add(bin.priceMid);
+    if (cumVol >= totalVol * 0.70) break;
+  }
+  const vaBins = bins.filter(b => vaSet.has(b.priceMid));
+  const vah = Math.max(...vaBins.map(b => b.priceMid));
+  const val = Math.min(...vaBins.map(b => b.priceMid));
+
+  return { bins, poc, vah, val, totalVol };
+}
+
+function generateCandles(count = 80) {
+  let p = 1.0820;
+  return Array.from({ length: count }, () => {
+    const o = p, m = (Math.random()-0.48)*0.0012;
+    const h = o + Math.random()*0.0008, l = o - Math.random()*0.0007, c = o+m;
+    p = c;
+    return { o, h:Math.max(h,o,c), l:Math.min(l,o,c), c, v:Math.random()*800+100 };
+  });
+}
+
+export default function VolumeProfile({ candles: propCandles, symbol="EUR/USD", price=1.0842, type="FOREX" }) {
+  const candles = propCandles || generateCandles(80);
+  const [levels, setLevels] = useState(24);
+  const [showLabels, setShowLabels] = useState(true);
+  const [showVA, setShowVA] = useState(true);
+
+  const W=380, CH=260, PL=52, PR=80, PT=10;
+  const CW = W - PL - PR;
+
+  const { bins, poc, vah, val } = useMemo(
+    () => generateVolumeProfile(candles, levels),
+    [candles, levels]
+  );
+
+  const allP = candles.flatMap(c=>[c.h,c.l]);
+  const minP = Math.min(...allP), maxP = Math.max(...allP);
+  const rng = maxP - minP || 0.0001;
+
+  const barW = CW / candles.length;
+  const px   = i => PL + i*barW + barW/2;
+  const py   = v => PT + CH - ((v-minP)/rng)*CH;
+
+  const maxBinVol = Math.max(...bins.map(b => b.volume));
+  const isFx = type==="FOREX";
+  const fmt  = v => isFx ? parseFloat(v).toFixed(4) : parseFloat(v).toFixed(1);
+
+  const pocY = py(poc);
+  const vahY = py(vah);
+  const valY = py(val);
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  `;
+
+  const curY = py(price);
+  const abovePOC = price > poc;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",maxWidth:480,margin:"0 auto",padding:"16px"}}>
+
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,
+          color:"#9944ff",letterSpacing:2,marginBottom:4}}>ORACLE TRADER</div>
+        <div style={{fontSize:22,fontWeight:900,color:"#ddeeff",marginBottom:4}}>
+          📊 Volume Profile
+        </div>
+        <div style={{fontSize:12,color:"#334466",fontFamily:"monospace",marginBottom:16}}>
+          {symbol} · Where volume was traded at each price level
+        </div>
+
+        {/* Controls */}
+        <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+          {[
+            {label:"POC Label",   active:showLabels, toggle:()=>setShowLabels(s=>!s), color:"#ffcc00"},
+            {label:"Value Area",  active:showVA,     toggle:()=>setShowVA(s=>!s),     color:"#00aaff"},
+          ].map(b=>(
+            <button key={b.label} onClick={b.toggle} style={{
+              background:b.active?b.color+"22":"#080f1e",
+              border:`1px solid ${b.active?b.color+"66":"#0d1e32"}`,
+              borderRadius:20,color:b.active?b.color:"#334466",
+              fontSize:10,padding:"4px 12px",cursor:"pointer",fontFamily:"monospace",
+            }}>{b.label}</button>
+          ))}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginLeft:"auto"}}>
+            <span style={{fontSize:9,color:"#334466",fontFamily:"monospace"}}>LEVELS</span>
+            <input type="range" min="12" max="40" value={levels}
+              onChange={e=>setLevels(parseInt(e.target.value))}
+              style={{width:80,accentColor:"#9944ff"}}/>
+            <span style={{fontSize:10,color:"#9944ff",fontFamily:"monospace"}}>{levels}</span>
+          </div>
+        </div>
+
+        {/* Main Chart */}
+        <div style={{background:"#06101c",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+          <svg width="100%" viewBox={`0 0 ${W} ${CH+PT+10}`} style={{display:"block"}}>
+            <defs>
+              <clipPath id="vpClip"><rect x={PL} y={PT} width={CW} height={CH}/></clipPath>
+            </defs>
+
+            <rect x={PL} y={PT} width={CW} height={CH} fill="#04080f" rx="2"/>
+
+            {/* Grid */}
+            {[0,.25,.5,.75,1].map((f,i)=>{
+              const pv=maxP-f*rng, yp=PT+f*CH;
+              return(<g key={i}>
+                <line x1={PL} y1={yp} x2={PL+CW} y2={yp}
+                  stroke="#0a1830" strokeWidth="0.5" strokeDasharray="3,6"/>
+                <text x={PL-3} y={yp+3} textAnchor="end"
+                  fill="#223344" fontSize="7" fontFamily="monospace">{fmt(pv)}</text>
+              </g>);
+            })}
+
+            {/* Value area background */}
+            {showVA && vahY>PT && valY<PT+CH && (
+              <rect x={PL} y={Math.max(vahY,PT)}
+                width={CW} height={Math.min(valY,PT+CH)-Math.max(vahY,PT)}
+                fill="#00aaff08" stroke="none"/>
+            )}
+
+            {/* Candles */}
+            <g clipPath="url(#vpClip)">
+              {candles.map((c,i)=>{
+                const x=px(i), up=c.c>=c.o;
+                const col=up?"#00cc66":"#ff3355";
+                const bT=py(Math.max(c.o,c.c)), bB=py(Math.min(c.o,c.c));
+                return(<g key={i}>
+                  <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)} stroke={col} strokeWidth="0.7"/>
+                  <rect x={x-barW*.38} y={bT} width={barW*.76} height={Math.max(bB-bT,1)}
+                    fill={col+"55"} stroke={col} strokeWidth="0.7" rx="0.3"/>
+                </g>);
+              })}
+            </g>
+
+            {/* Volume profile bars (RIGHT side) */}
+            {bins.map((bin,i)=>{
+              const y1 = py(bin.priceMax);
+              const y2 = py(bin.priceMin);
+              const barH = Math.max(y2-y1-0.5, 1);
+              const barLen = (bin.volume/maxBinVol) * (PR-12);
+              const isPOC = Math.abs(bin.priceMid-poc) < (maxP-minP)/levels/2;
+              const isVA  = bin.priceMid >= val && bin.priceMid <= vah;
+              const col   = isPOC ? "#ffcc00" : isVA ? "#00aaff88" : "#9944ff44";
+              return(
+                <rect key={i}
+                  x={PL+CW+2} y={y1} width={barLen} height={barH}
+                  fill={col} rx="1"/>
+              );
+            })}
+
+            {/* POC line */}
+            {pocY>PT && pocY<PT+CH && (
+              <g>
+                <line x1={PL} y1={pocY} x2={PL+CW+PR-4} y2={pocY}
+                  stroke="#ffcc00" strokeWidth="1" strokeDasharray="4,3" opacity="0.9"/>
+                {showLabels && <>
+                  <rect x={PL} y={pocY-8} width={22} height={9}
+                    fill="#ffcc0022" rx="1"/>
+                  <text x={PL+2} y={pocY-1} fill="#ffcc00" fontSize="7" fontFamily="monospace">POC</text>
+                  <text x={PL+CW+PR-2} y={pocY+3} textAnchor="end"
+                    fill="#ffcc00" fontSize="7" fontFamily="monospace">{fmt(poc)}</text>
+                </>}
+              </g>
+            )}
+
+            {/* VAH line */}
+            {showVA && vahY>PT && vahY<PT+CH && (
+              <g>
+                <line x1={PL} y1={vahY} x2={PL+CW} y2={vahY}
+                  stroke="#00aaff" strokeWidth="0.8" strokeDasharray="3,4" opacity="0.7"/>
+                {showLabels && <>
+                  <rect x={PL} y={vahY-8} width={22} height={9} fill="#00aaff18" rx="1"/>
+                  <text x={PL+2} y={vahY-1} fill="#00aaff" fontSize="7" fontFamily="monospace">VAH</text>
+                </>}
+              </g>
+            )}
+
+            {/* VAL line */}
+            {showVA && valY>PT && valY<PT+CH && (
+              <g>
+                <line x1={PL} y1={valY} x2={PL+CW} y2={valY}
+                  stroke="#00aaff" strokeWidth="0.8" strokeDasharray="3,4" opacity="0.7"/>
+                {showLabels && <>
+                  <rect x={PL} y={valY-8} width={22} height={9} fill="#00aaff18" rx="1"/>
+                  <text x={PL+2} y={valY-1} fill="#00aaff" fontSize="7" fontFamily="monospace">VAL</text>
+                </>}
+              </g>
+            )}
+
+            {/* Current price */}
+            {curY>PT && curY<PT+CH && (
+              <g>
+                <line x1={PL} y1={curY} x2={PL+CW} y2={curY}
+                  stroke={abovePOC?"#00ff88":"#ff4466"}
+                  strokeWidth="0.8" strokeDasharray="2,3" opacity="0.9"/>
+                <rect x={PL+CW} y={curY-6} width={48} height={12}
+                  fill={(abovePOC?"#00ff88":"#ff4466")+"33"} rx="2"/>
+                <text x={PL+CW+2} y={curY+3}
+                  fill={abovePOC?"#00ff88":"#ff4466"} fontSize="7" fontFamily="monospace">
+                  {fmt(price)}
+                </text>
+              </g>
+            )}
+          </svg>
+        </div>
+
+        {/* Key levels summary */}
+        <div style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:10,padding:14,marginBottom:12}}>
+          <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",letterSpacing:1,marginBottom:10}}>
+            KEY VOLUME LEVELS
+          </div>
+          {[
+            {label:"POC — Point of Control", val:fmt(poc), color:"#ffcc00",
+             desc:"Strongest price magnet — highest volume traded here"},
+            {label:"VAH — Value Area High",  val:fmt(vah), color:"#00aaff",
+             desc:"Upper boundary — price above here is 'premium'"},
+            {label:"VAL — Value Area Low",   val:fmt(val), color:"#00aaff",
+             desc:"Lower boundary — price below here is 'discount'"},
+            {label:"Current Price",          val:fmt(price), color:abovePOC?"#00ff88":"#ff4466",
+             desc:abovePOC?"Price ABOVE POC — bullish pressure":"Price BELOW POC — bearish pressure"},
+          ].map(({label,val,color,desc})=>(
+            <div key={label} style={{padding:"9px 0",borderBottom:"1px solid #06101c"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                <span style={{fontSize:12,color:color,fontWeight:700}}>{label}</span>
+                <span style={{fontSize:12,color,fontFamily:"monospace",fontWeight:"bold"}}>{val}</span>
+              </div>
+              <div style={{fontSize:10,color:"#334466"}}>{desc}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Reading guide */}
+        <div style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:10,padding:14}}>
+          <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",letterSpacing:1,marginBottom:10}}>
+            HOW TO TRADE VOLUME PROFILE
+          </div>
+          {[
+            {icon:"🟡",text:"Buy near VAL",        desc:"Discount zone — institutions buy here"},
+            {icon:"🔵",text:"Sell near VAH",        desc:"Premium zone — institutions sell here"},
+            {icon:"⭐",text:"POC = magnet",         desc:"Price always returns to highest volume node"},
+            {icon:"🟢",text:"LVN below = support",  desc:"Little volume = price moves fast upward"},
+            {icon:"🔴",text:"HVN above = resistance",desc:"Heavy volume = price struggles to break through"},
+          ].map((r,i)=>(
+            <div key={i} style={{display:"flex",gap:10,padding:"6px 0",
+              borderBottom:i<4?"1px solid #06101c":"none"}}>
+              <span style={{fontSize:16,flexShrink:0}}>{r.icon}</span>
+              <div>
+                <div style={{fontSize:12,color:"#aabbdd",fontWeight:700}}>{r.text}</div>
+                <div style={{fontSize:11,color:"#334466",marginTop:1}}>{r.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",textAlign:"center",marginTop:16}}>
+          🔮 ORACLE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

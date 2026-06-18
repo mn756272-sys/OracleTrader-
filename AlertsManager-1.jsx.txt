@@ -1,0 +1,334 @@
+import { useState, useEffect } from "react";
+
+const INSTRUMENTS = ["EUR/USD","GBP/USD","USD/ZAR","XAU/USD","Boom 1000","Boom 500","Crash 1000","Crash 500","SPY","BTC/USD"];
+
+export default function AlertsManager() {
+  const [alerts, setAlerts] = useState([
+    { id:1, sym:"EUR/USD", type:"price", op:"above", value:1.0900, active:true, channel:"push", fired:false },
+    { id:2, sym:"Boom 1000", type:"signal", op:"BUY", value:null, active:true, channel:"telegram", fired:false },
+    { id:3, sym:"XAU/USD", type:"rsi", op:"below", value:30, active:false, channel:"push", fired:true },
+  ]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [telegramId, setTelegramId] = useState("");
+  const [form, setForm] = useState({ sym:"EUR/USD", type:"price", op:"above", value:"", channel:"push" });
+  const [tab, setTab] = useState("alerts");
+  const [notifEnabled, setNotifEnabled] = useState(false);
+
+  function addAlert() {
+    if (form.type!=="signal" && !form.value) return;
+    setAlerts(p=>[...p,{ id:Date.now(), ...form, value:parseFloat(form.value)||null, active:true, fired:false }]);
+    setShowAdd(false);
+    setForm({ sym:"EUR/USD", type:"price", op:"above", value:"", channel:"push" });
+  }
+
+  function toggleAlert(id) {
+    setAlerts(p=>p.map(a=>a.id===id?{...a,active:!a.active}:a));
+  }
+
+  function deleteAlert(id) {
+    setAlerts(p=>p.filter(a=>a.id!==id));
+  }
+
+  function requestNotif() {
+    if("Notification" in window) {
+      Notification.requestPermission().then(p=>{
+        setNotifEnabled(p==="granted");
+      });
+    }
+  }
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input,select{outline:none;transition:border-color 0.2s}
+    input:focus,select:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+    select option{background:#080f1e}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  const inputStyle = {
+    width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+    borderRadius:8, color:"#aabbd0", padding:"10px 12px",
+    fontSize:13, fontFamily:"monospace",
+  };
+
+  const selectStyle = { ...inputStyle };
+
+  const ALERT_TYPES = [
+    { v:"price", label:"Price Alert" },
+    { v:"signal", label:"Signal Alert" },
+    { v:"rsi", label:"RSI Alert" },
+    { v:"spike", label:"Spike Alert" },
+  ];
+
+  const CHANNELS = [
+    { v:"push", label:"📱 Push Notification", color:"#00aaff" },
+    { v:"telegram", label:"✈ Telegram", color:"#00aaff" },
+    { v:"both", label:"📱+✈ Both", color:"#bb44ff" },
+  ];
+
+  function alertLabel(a) {
+    if (a.type==="price") return `Price ${a.op} ${a.value}`;
+    if (a.type==="signal") return `Signal: ${a.op}`;
+    if (a.type==="rsi") return `RSI ${a.op} ${a.value}`;
+    if (a.type==="spike") return "Spike detected";
+    return "";
+  }
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12, color:"#00aaff", letterSpacing:2, marginBottom:4 }}>
+          SMONKIE TRADER
+        </div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:20 }}>🔔 Alerts</div>
+
+        {/* Tabs */}
+        <div style={{ display:"flex", background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:8, padding:3, marginBottom:20 }}>
+          {[{k:"alerts",label:"My Alerts"},{k:"settings",label:"Settings"}].map(t=>(
+            <button key={t.k} onClick={()=>setTab(t.k)} style={{
+              flex:1, padding:"10px", border:"none", borderRadius:6,
+              background:tab===t.k?"linear-gradient(135deg,#0044aa,#0066cc)":"transparent",
+              color:tab===t.k?"#fff":"#334466", fontSize:13,
+              cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {tab==="alerts" && (
+          <>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", letterSpacing:1 }}>
+                {alerts.filter(a=>a.active).length} active · {alerts.length} total
+              </div>
+              <button onClick={()=>setShowAdd(s=>!s)} style={{
+                background:"linear-gradient(135deg,#0044aa,#0066cc)", border:"none",
+                borderRadius:8, color:"#fff", padding:"8px 16px", fontSize:12,
+                cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+              }}>+ New Alert</button>
+            </div>
+
+            {/* Add form */}
+            {showAdd && (
+              <div className="fadein" style={{ background:"#080f1e", border:"1px solid #0044aa44",
+                borderRadius:10, padding:16, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff", marginBottom:14 }}>New Alert</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>INSTRUMENT</div>
+                    <select value={form.sym} onChange={e=>setForm(p=>({...p,sym:e.target.value}))} style={selectStyle}>
+                      {INSTRUMENTS.map(i=><option key={i} value={i}>{i}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>TYPE</div>
+                    <select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))} style={selectStyle}>
+                      {ALERT_TYPES.map(t=><option key={t.v} value={t.v}>{t.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {form.type==="price" && (
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                    <div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>CONDITION</div>
+                      <select value={form.op} onChange={e=>setForm(p=>({...p,op:e.target.value}))} style={selectStyle}>
+                        <option value="above">Price Above</option>
+                        <option value="below">Price Below</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>VALUE</div>
+                      <input type="number" value={form.value} onChange={e=>setForm(p=>({...p,value:e.target.value}))}
+                        placeholder="1.0900" style={inputStyle}/>
+                    </div>
+                  </div>
+                )}
+
+                {form.type==="signal" && (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>SIGNAL TYPE</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {["BUY","SELL","STRONG BUY","STRONG SELL"].map(s=>(
+                        <button key={s} onClick={()=>setForm(p=>({...p,op:s}))} style={{
+                          flex:1, padding:"8px 4px",
+                          background:form.op===s?"#0044aa22":"#060d18",
+                          border:`1px solid ${form.op===s?"#0044aa":"#0d1e32"}`,
+                          borderRadius:6, color:form.op===s?"#00aaff":"#334466",
+                          fontSize:9, cursor:"pointer", fontFamily:"monospace",
+                        }}>{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {form.type==="rsi" && (
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                    <div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>CONDITION</div>
+                      <select value={form.op} onChange={e=>setForm(p=>({...p,op:e.target.value}))} style={selectStyle}>
+                        <option value="below">RSI Below</option>
+                        <option value="above">RSI Above</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>VALUE</div>
+                      <input type="number" value={form.value} onChange={e=>setForm(p=>({...p,value:e.target.value}))}
+                        placeholder="30" style={inputStyle}/>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:6 }}>NOTIFICATION CHANNEL</div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    {CHANNELS.map(c=>(
+                      <button key={c.v} onClick={()=>setForm(p=>({...p,channel:c.v}))} style={{
+                        flex:1, padding:"8px 4px", fontSize:10, cursor:"pointer",
+                        background:form.channel===c.v?c.color+"22":"#060d18",
+                        border:`1px solid ${form.channel===c.v?c.color+"66":"#0d1e32"}`,
+                        borderRadius:6, color:form.channel===c.v?c.color:"#334466",
+                        fontFamily:"monospace", textAlign:"center",
+                      }}>{c.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>setShowAdd(false)} style={{
+                    flex:1, background:"none", border:"1px solid #0d1e32", borderRadius:8,
+                    color:"#334466", padding:"10px", fontSize:13, cursor:"pointer",
+                    fontFamily:"'Rajdhani',sans-serif", fontWeight:600,
+                  }}>Cancel</button>
+                  <button onClick={addAlert} style={{
+                    flex:2, background:"linear-gradient(135deg,#0044aa,#0066cc)", border:"none",
+                    borderRadius:8, color:"#fff", padding:"10px", fontSize:14, cursor:"pointer",
+                    fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+                  }}>Create Alert</button>
+                </div>
+              </div>
+            )}
+
+            {/* Alert list */}
+            {alerts.length===0 && (
+              <div style={{ textAlign:"center", padding:"48px 20px", color:"#334466", fontFamily:"monospace", fontSize:12 }}>
+                <div style={{ fontSize:32, marginBottom:12 }}>🔔</div>
+                No alerts yet.<br/>Create one above.
+              </div>
+            )}
+            {alerts.map(a=>(
+              <div key={a.id} style={{
+                background:"#080f1e",
+                border:`1px solid ${a.fired?"#ffcc0033":a.active?"#0044aa33":"#0d1e32"}`,
+                borderLeft:`3px solid ${a.fired?"#ffcc00":a.active?"#00aaff":"#334466"}`,
+                borderRadius:8, padding:"12px 14px", marginBottom:8,
+                opacity:a.active?1:0.5, transition:"opacity 0.2s",
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <span style={{ fontSize:14, fontWeight:700, color:"#ddeeff" }}>{a.sym}</span>
+                    {a.fired && <span style={{ fontSize:9, color:"#ffcc00", fontFamily:"monospace",
+                      background:"#ffcc0015", border:"1px solid #ffcc0033", borderRadius:4,
+                      padding:"1px 6px" }}>FIRED</span>}
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>toggleAlert(a.id)} style={{
+                      background: a.active?"#00ff8815":"#0d1e32",
+                      border:`1px solid ${a.active?"#00ff8844":"#1e3050"}`,
+                      borderRadius:4, color:a.active?"#00ff88":"#334466",
+                      fontSize:10, padding:"3px 8px", cursor:"pointer", fontFamily:"monospace",
+                    }}>{a.active?"ON":"OFF"}</button>
+                    <button onClick={()=>deleteAlert(a.id)} style={{
+                      background:"none", border:"1px solid #ff446633", borderRadius:4,
+                      color:"#ff4466", fontSize:10, padding:"3px 8px",
+                      cursor:"pointer", fontFamily:"monospace",
+                    }}>✕</button>
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:"#667799", fontFamily:"monospace" }}>
+                  {alertLabel(a)} · via {a.channel}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {tab==="settings" && (
+          <div>
+            {/* Push notifications */}
+            <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:16, marginBottom:14 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff", marginBottom:14 }}>📱 Push Notifications</div>
+              <div style={{ fontSize:13, color:"#667799", marginBottom:14, lineHeight:1.6 }}>
+                Enable push notifications to receive alerts even when SMONKIE is closed.
+              </div>
+              <button onClick={requestNotif} style={{
+                width:"100%", background: notifEnabled?"#00ff8815":"linear-gradient(135deg,#0044aa,#0066cc)",
+                border:`1px solid ${notifEnabled?"#00ff88":"#0044aa"}`,
+                borderRadius:8, color:notifEnabled?"#00ff88":"#fff",
+                padding:"12px", fontSize:14, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+              }}>{notifEnabled?"✓ Notifications Enabled":"Enable Push Notifications"}</button>
+            </div>
+
+            {/* Telegram */}
+            <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:16, marginBottom:14 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff", marginBottom:4 }}>✈ Telegram Alerts</div>
+              <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:14 }}>
+                Receive signals directly in Telegram
+              </div>
+              <div style={{ fontSize:11, color:"#667799", marginBottom:10, lineHeight:1.6 }}>
+                1. Search <span style={{ color:"#00aaff", fontFamily:"monospace" }}>@SmonkieAlertBot</span> on Telegram<br/>
+                2. Send /start to get your Chat ID<br/>
+                3. Paste your Chat ID below
+              </div>
+              <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:5 }}>YOUR TELEGRAM CHAT ID</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <input value={telegramId} onChange={e=>setTelegramId(e.target.value)}
+                  placeholder="e.g. 123456789"
+                  style={{ flex:1, background:"#060d18", border:"1px solid #0d1e32",
+                    borderRadius:8, color:"#aabbd0", padding:"10px 12px",
+                    fontSize:13, fontFamily:"monospace", outline:"none" }}/>
+                <button style={{
+                  background:"linear-gradient(135deg,#0044aa,#0066cc)", border:"none",
+                  borderRadius:8, color:"#fff", padding:"10px 16px", fontSize:13,
+                  cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+                }}>Save</button>
+              </div>
+            </div>
+
+            {/* Quiet hours */}
+            <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:16 }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff", marginBottom:14 }}>🌙 Quiet Hours</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                {[{label:"FROM",val:"22:00"},{label:"TO",val:"06:00"}].map(t=>(
+                  <div key={t.label}>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:5 }}>{t.label}</div>
+                    <input type="time" defaultValue={t.val}
+                      style={{ width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+                        borderRadius:8, color:"#aabbd0", padding:"10px 12px",
+                        fontSize:13, fontFamily:"monospace", outline:"none" }}/>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginTop:10 }}>
+                No alerts during quiet hours
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace", textAlign:"center", marginTop:20 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

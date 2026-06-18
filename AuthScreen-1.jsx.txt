@@ -1,0 +1,226 @@
+import { useState } from "react";
+// import { signIn, signUp, signInWithGoogle, resetPassword } from "./firebase";
+
+const BRAND = { name:"ORACLE TRADER", icon:"🔮", color:"#9944ff" };
+
+const PLANS = [
+  { id:"free",  label:"Free",  price:"$0",  color:"#aabbdd" },
+  { id:"pro",   label:"Pro",   price:"$15", color:"#00aaff" },
+  { id:"elite", label:"Elite", price:"$30", color:"#9944ff" },
+];
+
+export default function AuthScreen({ onAuth }) {
+  const [mode,     setMode]   = useState("login");
+  const [email,    setEmail]  = useState("");
+  const [password, setPass]   = useState("");
+  const [confirm,  setConf]   = useState("");
+  const [name,     setName]   = useState("");
+  const [loading,  setLoad]   = useState(false);
+  const [error,    setError]  = useState("");
+  const [showPass, setShowP]  = useState(false);
+  const [resetSent,setReset]  = useState(false);
+  const [plan,     setPlan]   = useState("free");
+
+  function validate() {
+    if (!email || !email.includes("@")) return "Enter a valid email";
+    if (password.length < 6)            return "Password must be 6+ characters";
+    if (mode==="signup" && !name.trim())return "Please enter your name";
+    if (mode==="signup" && password!==confirm) return "Passwords do not match";
+    return null;
+  }
+
+  async function handleSubmit() {
+    const err = validate(); if (err) { setError(err); return; }
+    setError(""); setLoad(true);
+    try {
+      if (mode==="login") {
+        // FIREBASE: const user = await signIn(email, password);
+        await new Promise(r=>setTimeout(r,1200));
+        onAuth?.({ email, displayName:email.split("@")[0], plan:"free", uid:"demo" });
+      } else {
+        // FIREBASE: const user = await signUp(email, password, name);
+        await new Promise(r=>setTimeout(r,1500));
+        onAuth?.({ email, displayName:name, plan, uid:"demo" });
+      }
+    } catch(e) {
+      setError(
+        e?.code==="auth/user-not-found"       ? "No account found with this email" :
+        e?.code==="auth/wrong-password"        ? "Incorrect password" :
+        e?.code==="auth/email-already-in-use"  ? "Account already exists" :
+        "Something went wrong. Please try again"
+      );
+    }
+    setLoad(false);
+  }
+
+  async function handleGoogle() {
+    setError(""); setLoad(true);
+    try {
+      // FIREBASE: const user = await signInWithGoogle();
+      await new Promise(r=>setTimeout(r,1000));
+      onAuth?.({ email:"google@user.com", displayName:"Google User", plan:"free", uid:"google" });
+    } catch { setError("Google sign-in failed"); }
+    setLoad(false);
+  }
+
+  async function handleReset() {
+    if (!email) { setError("Enter your email first"); return; }
+    setLoad(true);
+    // FIREBASE: await resetPassword(email);
+    await new Promise(r=>setTimeout(r,800));
+    setReset(true); setLoad(false);
+  }
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}body{background:#060d18}
+    input{outline:none;transition:border-color 0.2s}
+    input:focus{border-color:#6622cc !important}
+    input::placeholder{color:#233344}
+    @keyframes glow{0%,100%{filter:drop-shadow(0 0 8px #9944ff)}50%{filter:drop-shadow(0 0 20px #cc77ff)}}
+    @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .glow{animation:glow 3s ease-in-out infinite}
+    .fi{animation:fadein 0.3s ease}
+  `;
+  const S={width:"100%",background:"#060d18",border:"1px solid #0d1e32",borderRadius:8,color:"#aabbd0",padding:"12px 14px",fontSize:14,fontFamily:"'Rajdhani',sans-serif"};
+
+  return(
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",minHeight:"100vh",color:"#c8d8f0",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 16px"}}>
+
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div className="glow" style={{fontSize:56,marginBottom:10,display:"inline-block"}}>{BRAND.icon}</div>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:18,color:BRAND.color,letterSpacing:3,marginBottom:4}}>{BRAND.name}</div>
+          <div style={{fontSize:11,color:"#334466",fontFamily:"monospace"}}>AI-POWERED · ALL-SEEING · MULTI-MARKET</div>
+        </div>
+
+        {/* Card */}
+        <div className="fi" key={mode} style={{background:"#080f1e",border:"1px solid #0d1e32",borderRadius:16,padding:"24px 20px",width:"100%",maxWidth:400}}>
+
+          {/* Tabs */}
+          <div style={{display:"flex",background:"#060d18",borderRadius:8,padding:3,marginBottom:22}}>
+            {[["login","Sign In"],["signup","Create Account"]].map(([m,label])=>(
+              <button key={m} onClick={()=>{setMode(m);setError("");setReset(false);}} style={{
+                flex:1,padding:"10px",border:"none",borderRadius:6,
+                background:mode===m?`linear-gradient(135deg,${BRAND.color},#7722ee)`:"transparent",
+                color:mode===m?"#fff":"#334466",fontSize:13,cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif",fontWeight:700,transition:"all 0.2s",
+              }}>{label}</button>
+            ))}
+          </div>
+
+          {/* Google */}
+          <button onClick={handleGoogle} disabled={loading} style={{
+            width:"100%",background:"#060d18",border:"1px solid #0d1e32",borderRadius:8,
+            color:"#aabbdd",padding:"12px",fontSize:14,cursor:"pointer",
+            fontFamily:"'Rajdhani',sans-serif",fontWeight:600,marginBottom:16,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            Continue with Google
+          </button>
+
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+            <div style={{flex:1,height:1,background:"#0d1e32"}}/>
+            <span style={{fontSize:10,color:"#334466",fontFamily:"monospace"}}>OR</span>
+            <div style={{flex:1,height:1,background:"#0d1e32"}}/>
+          </div>
+
+          {/* Name */}
+          {mode==="signup"&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",marginBottom:5,letterSpacing:1}}>FULL NAME</div>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={S}/>
+            </div>
+          )}
+
+          {/* Email */}
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",marginBottom:5,letterSpacing:1}}>EMAIL</div>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" style={S}/>
+          </div>
+
+          {/* Password */}
+          <div style={{marginBottom:mode==="signup"?12:8}}>
+            <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",marginBottom:5,letterSpacing:1}}>PASSWORD</div>
+            <div style={{position:"relative"}}>
+              <input type={showPass?"text":"password"} value={password} onChange={e=>setPass(e.target.value)} placeholder="••••••••" style={{...S,paddingRight:44}}/>
+              <button onClick={()=>setShowP(s=>!s)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#334466",cursor:"pointer",fontSize:16}}>{showPass?"🙈":"👁"}</button>
+            </div>
+          </div>
+
+          {/* Confirm */}
+          {mode==="signup"&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",marginBottom:5,letterSpacing:1}}>CONFIRM PASSWORD</div>
+              <input type="password" value={confirm} onChange={e=>setConf(e.target.value)} placeholder="••••••••" style={S}/>
+            </div>
+          )}
+
+          {/* Forgot */}
+          {mode==="login"&&(
+            <div style={{textAlign:"right",marginBottom:16}}>
+              <button onClick={handleReset} style={{background:"none",border:"none",color:"#334466",fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>Forgot password?</button>
+            </div>
+          )}
+
+          {/* Plan selector */}
+          {mode==="signup"&&(
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",marginBottom:8,letterSpacing:1}}>SELECT PLAN</div>
+              <div style={{display:"flex",gap:6}}>
+                {PLANS.map(p=>(
+                  <button key={p.id} onClick={()=>setPlan(p.id)} style={{
+                    flex:1,background:plan===p.id?p.color+"22":"#060d18",
+                    border:`1px solid ${plan===p.id?p.color+"66":"#0d1e32"}`,
+                    borderRadius:8,padding:"8px 4px",cursor:"pointer",transition:"all 0.2s",
+                  }}>
+                    <div style={{fontSize:12,color:plan===p.id?p.color:"#334466",fontWeight:700}}>{p.label}</div>
+                    <div style={{fontSize:11,color:plan===p.id?p.color:"#1e3050",fontFamily:"monospace"}}>{p.price}/mo</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {error&&<div style={{background:"#1a0808",border:"1px solid #441111",borderRadius:6,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#ff4466",fontFamily:"monospace"}}>⚠ {error}</div>}
+
+          {/* Reset sent */}
+          {resetSent&&<div style={{background:"#001a0a",border:"1px solid #00441133",borderRadius:6,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#00ff88",fontFamily:"monospace"}}>✓ Password reset email sent. Check your inbox.</div>}
+
+          {/* Submit */}
+          <button onClick={handleSubmit} disabled={loading} style={{
+            width:"100%",padding:"14px",
+            background:loading?"#0a0620":`linear-gradient(135deg,${BRAND.color},#7722ee)`,
+            border:`1px solid ${BRAND.color}`,borderRadius:10,
+            color:loading?"#334466":"#fff",fontSize:15,
+            cursor:loading?"default":"pointer",
+            fontFamily:"'Rajdhani',sans-serif",fontWeight:700,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:8,
+            transition:"all 0.2s",marginBottom:14,
+          }}>
+            {loading?(
+              <><span style={{width:16,height:16,borderRadius:"50%",border:"2px solid #334466",borderTopColor:BRAND.color,animation:"spin 0.8s linear infinite",display:"inline-block"}}/>{mode==="login"?"Signing in...":"Creating account..."}</>
+            ):(mode==="login"?`${BRAND.icon} Sign In`:`${BRAND.icon} Create Account`)}
+          </button>
+
+          {mode==="signup"&&<div style={{fontSize:11,color:"#1e3050",fontFamily:"monospace",textAlign:"center",lineHeight:1.6}}>By signing up you agree to our Terms of Service.<br/>⚠ ORACLE TRADER is not financial advice.</div>}
+        </div>
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",marginTop:20,textAlign:"center"}}>
+          🔮 ORACLE TRADER v1.0 · NOT FINANCIAL ADVICE
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </>
+  );
+}

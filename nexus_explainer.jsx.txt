@@ -1,0 +1,717 @@
+import { useState, useEffect, useRef } from "react";
+
+// ── Animated price chart data generator ──
+function generateCandles(count = 40) {
+  let price = 1.0842;
+  return Array.from({ length: count }, (_, i) => {
+    const o = price;
+    const move = (Math.random() - 0.48) * 0.004;
+    const h = o + Math.random() * 0.003;
+    const l = o - Math.random() * 0.003;
+    const c = o + move;
+    price = c;
+    return { o, h: Math.max(h, o, c), l: Math.min(l, o, c), c, i };
+  });
+}
+
+function computeRSIArr(closes) {
+  const period = 14;
+  const rsi = Array(closes.length).fill(50);
+  for (let i = period; i < closes.length; i++) {
+    let gains = 0, losses = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const d = closes[j] - closes[j - 1];
+      if (d > 0) gains += d; else losses -= d;
+    }
+    const ag = gains / period, al = losses / period;
+    rsi[i] = al === 0 ? 100 : parseFloat((100 - 100 / (1 + ag / al)).toFixed(1));
+  }
+  return rsi;
+}
+
+// ── Candle chart SVG ──
+function CandleChart({ candles, rsiArr, width = 320, height = 140, showRsi = false }) {
+  const prices = candles.flatMap(c => [c.h, c.l]);
+  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  const rng = maxP - minP || 0.001;
+  const cw = width / candles.length;
+  const py = v => ((maxP - v) / rng) * (height - 4) + 2;
+
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      <defs>
+        <linearGradient id="chartBg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#001428" />
+          <stop offset="100%" stopColor="#000a18" />
+        </linearGradient>
+      </defs>
+      <rect width={width} height={height} fill="url(#chartBg)" rx="4" />
+      {/* Grid lines */}
+      {[0.25, 0.5, 0.75].map((f, i) => (
+        <line key={i} x1={0} y1={height * f} x2={width} y2={height * f}
+          stroke="#0d1e32" strokeWidth="0.5" strokeDasharray="3,4" />
+      ))}
+      {/* Candles */}
+      {candles.map((c, i) => {
+        const x = i * cw + cw / 2;
+        const up = c.c >= c.o;
+        const col = up ? "#00cc66" : "#ff3355";
+        const bodyTop = py(Math.max(c.o, c.c));
+        const bodyBot = py(Math.min(c.o, c.c));
+        const bodyH = Math.max(bodyBot - bodyTop, 1);
+        return (
+          <g key={i}>
+            <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)} stroke={col} strokeWidth="0.8" />
+            <rect x={x - cw * 0.35} y={bodyTop} width={cw * 0.7} height={bodyH}
+              fill={up ? "#00cc6655" : "#ff335555"} stroke={col} strokeWidth="0.8" rx="0.5" />
+          </g>
+        );
+      })}
+      {/* RSI overlay line */}
+      {showRsi && (() => {
+        const pts = rsiArr.map((v, i) =>
+          `${i * cw + cw / 2},${((100 - v) / 100) * (height - 4) + 2}`
+        ).join(" ");
+        return <polyline points={pts} fill="none" stroke="#ff9900" strokeWidth="1.5" opacity="0.8" />;
+      })()}
+    </svg>
+  );
+}
+
+// ── RSI gauge ──
+function RsiGauge({ value }) {
+  const angle = ((value / 100) * 180) - 90;
+  const color = value <= 30 ? "#00ff88" : value >= 70 ? "#ff3355" : "#ffcc00";
+  const r = 44, cx = 54, cy = 54;
+  const toXY = (deg) => {
+    const rad = (deg * Math.PI) / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  };
+  const start = toXY(-180), end = toXY(0);
+  const needle = toXY(angle - 90);
+  return (
+    <svg width={108} height={64} viewBox="0 0 108 64">
+      <path d={`M ${start.x} ${start.y} A ${r} ${r} 0 0 1 ${end.x} ${end.y}`}
+        fill="none" stroke="#0d1e32" strokeWidth="8" strokeLinecap="round" />
+      {value <= 30 && (
+        <path d={`M ${start.x} ${start.y} A ${r} ${r} 0 0 1 ${toXY(angle - 90).x} ${toXY(angle - 90).y}`}
+          fill="none" stroke="#00ff88" strokeWidth="8" strokeLinecap="round" />
+      )}
+      {value >= 70 && (
+        <path d={`M ${toXY(angle - 90).x} ${toXY(angle - 90).y} A ${r} ${r} 0 0 1 ${end.x} ${end.y}`}
+          fill="none" stroke="#ff3355" strokeWidth="8" strokeLinecap="round" />
+      )}
+      <line x1={cx} y1={cy} x2={needle.x} y2={needle.y} stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="4" fill={color} />
+      <text x={cx} y={62} textAnchor="middle" fill={color} fontSize="14" fontFamily="monospace" fontWeight="bold">{value}</text>
+      <text x="8" y={62} fill="#334466" fontSize="8" fontFamily="monospace">0</text>
+      <text x="90" y={62} fill="#334466" fontSize="8" fontFamily="monospace">100</text>
+    </svg>
+  );
+}
+
+// ── Animated data packet ──
+function DataPacket({ active, x1, y1, x2, y2, color = "#00aaff", label = "" }) {
+  const [pos, setPos] = useState(0);
+  useEffect(() => {
+    if (!active) { setPos(0); return; }
+    let frame;
+    const start = Date.now();
+    const dur = 1200;
+    const tick = () => {
+      const t = Math.min((Date.now() - start) / dur, 1);
+      setPos(t);
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
+  const px = x1 + (x2 - x1) * pos;
+  const py = y1 + (y2 - y1) * pos;
+  return (
+    <g>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color + "33"} strokeWidth="1.5" strokeDasharray="4,4" />
+      {active && pos > 0 && pos < 1 && (
+        <>
+          <circle cx={px} cy={py} r="5" fill={color} opacity="0.9">
+            <animate attributeName="r" values="4;6;4" dur="0.6s" repeatCount="indefinite" />
+          </circle>
+          <circle cx={px} cy={py} r="10" fill="none" stroke={color} strokeWidth="1" opacity="0.4" />
+        </>
+      )}
+      {label && <text x={(x1 + x2) / 2} y={Math.min(y1, y2) - 6} textAnchor="middle" fill={color + "88"} fontSize="8" fontFamily="monospace">{label}</text>}
+    </g>
+  );
+}
+
+// ══════════════════════════════
+// SCENES
+// ══════════════════════════════
+
+const SCENES = [
+  {
+    id: "intro",
+    title: "NEXUS TRADER",
+    subtitle: "How the system works — animated walkthrough",
+  },
+  {
+    id: "architecture",
+    title: "System Architecture",
+    subtitle: "3 layers working together",
+  },
+  {
+    id: "dataflow",
+    title: "Data Flow",
+    subtitle: "How real prices reach your phone",
+  },
+  {
+    id: "rsi",
+    title: "RSI Indicator",
+    subtitle: "Reading buy & sell signals",
+  },
+  {
+    id: "macd",
+    title: "MACD Crossover",
+    subtitle: "Spotting trend reversals",
+  },
+  {
+    id: "signal",
+    title: "Signal Engine",
+    subtitle: "How BUY / SELL is decided",
+  },
+  {
+    id: "deploy",
+    title: "Deployment",
+    subtitle: "From code to your phone",
+  },
+];
+
+// ── Scene renderers ──────────────────────────────────────────
+
+function SceneIntro() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 80);
+    return () => clearInterval(iv);
+  }, []);
+  const particles = useRef(
+    Array.from({ length: 22 }, () => ({
+      x: Math.random() * 340, y: Math.random() * 260,
+      vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+      r: Math.random() * 2 + 1, col: ["#003388", "#004499", "#002266"][Math.floor(Math.random() * 3)],
+    }))
+  );
+  particles.current.forEach(p => {
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0 || p.x > 340) p.vx *= -1;
+    if (p.y < 0 || p.y > 260) p.vy *= -1;
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 16, position: "relative" }}>
+      <svg style={{ position: "absolute", inset: 0 }} width="100%" height="100%">
+        {particles.current.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={p.r} fill={p.col} opacity="0.6" />
+        ))}
+        {particles.current.slice(0, 8).map((p, i) => {
+          const q = particles.current[(i + 3) % particles.current.length];
+          const d = Math.hypot(p.x - q.x, p.y - q.y);
+          return d < 80 ? <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#002255" strokeWidth="0.5" opacity={1 - d / 80} /> : null;
+        })}
+      </svg>
+      <div style={{
+        fontSize: 11, letterSpacing: 6, color: "#003388",
+        fontFamily: "monospace", textTransform: "uppercase",
+        animation: "fadein 0.8s ease",
+      }}>ANIMATED EXPLAINER</div>
+      <div style={{
+        fontSize: 36, fontWeight: 900, color: "#0088ff",
+        fontFamily: "'Share Tech Mono', monospace",
+        textShadow: "0 0 40px #0044aa, 0 0 80px #002266",
+        letterSpacing: 3, textAlign: "center", lineHeight: 1.1,
+        animation: "fadein 0.6s ease",
+      }}>NEXUS<br />TRADER</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        {["Real Data", "AI Signals", "Forex", "Stocks", "Mobile"].map((t, i) => (
+          <div key={t} style={{
+            background: "#001428", border: "1px solid #003366",
+            borderRadius: 20, padding: "4px 12px",
+            fontSize: 11, color: "#004488", fontFamily: "monospace",
+            animation: `fadein 0.6s ${i * 0.1 + 0.4}s both`,
+          }}>{t}</div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "#002244", fontFamily: "monospace", marginTop: 8 }}>
+        Tap → to begin
+      </div>
+    </div>
+  );
+}
+
+function SceneArchitecture() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setStep(s => (s + 1) % 4), 1200);
+    return () => clearInterval(iv);
+  }, []);
+  const boxes = [
+    { label: "YAHOO\nFINANCE", sub: "Real price source", color: "#ffaa00", y: 30, icon: "📡" },
+    { label: "PYTHON\nBACKEND", sub: "FastAPI + yfinance + ta", color: "#00aaff", y: 110, icon: "⚙️" },
+    { label: "REACT\nFRONTEND", sub: "NexusTrader.jsx", color: "#00ff88", y: 190, icon: "📱" },
+  ];
+  return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>
+      <svg width="320" height="280" viewBox="0 0 320 280">
+        {/* Connections */}
+        {step >= 1 && <DataPacket active={step === 1} x1={160} y1={68} x2={160} y2={108} color="#ffaa00" label="OHLCV data" />}
+        {step >= 2 && <DataPacket active={step === 2} x1={160} y1={148} x2={160} y2={188} color="#00aaff" label="JSON signals" />}
+        {step >= 3 && (
+          <g>
+            <rect x={80} y={232} width={160} height={28} rx="6" fill="#00ff8811" stroke="#00ff8833" strokeWidth="1" />
+            <text x={160} y={250} textAnchor="middle" fill="#00ff88" fontSize="10" fontFamily="monospace">📲 Your Phone 24/7</text>
+          </g>
+        )}
+        {boxes.map((b, i) => (
+          <g key={i} style={{ animation: `fadein 0.4s ${i * 0.15}s both` }}>
+            <rect x={70} y={b.y} width={180} height={58} rx="10"
+              fill={b.color + "11"} stroke={b.color + "55"} strokeWidth="1.5" />
+            <text x={104} y={b.y + 20} fill={b.color} fontSize="14">{b.icon}</text>
+            <text x={120} y={b.y + 22} fill={b.color} fontSize="11" fontFamily="monospace" fontWeight="bold">{b.label.split("\n")[0]}</text>
+            <text x={120} y={b.y + 34} fill={b.color} fontSize="11" fontFamily="monospace" fontWeight="bold">{b.label.split("\n")[1]}</text>
+            <text x={120} y={b.y + 47} fill={b.color + "88"} fontSize="8" fontFamily="monospace">{b.sub}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function SceneDataFlow() {
+  const [phase, setPhase] = useState(0);
+  const steps = [
+    { label: "1. React asks backend for prices", color: "#00aaff" },
+    { label: "2. Backend calls Yahoo Finance", color: "#ffaa00" },
+    { label: "3. Yahoo returns OHLCV candles", color: "#ffaa00" },
+    { label: "4. Backend calculates indicators", color: "#00aaff" },
+    { label: "5. JSON response sent to React", color: "#00ff88" },
+    { label: "6. Screen updates with live data", color: "#00ff88" },
+  ];
+  useEffect(() => {
+    const iv = setInterval(() => setPhase(p => (p + 1) % steps.length), 1400);
+    return () => clearInterval(iv);
+  }, []);
+  return (
+    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 8, justifyContent: "center", height: "100%" }}>
+      {steps.map((s, i) => (
+        <div key={i} style={{
+          display: "flex", alignItems: "center", gap: 10,
+          background: i === phase ? s.color + "15" : "#080f1e",
+          border: `1px solid ${i === phase ? s.color + "55" : "#0d1e32"}`,
+          borderRadius: 8, padding: "10px 14px",
+          transition: "all 0.3s",
+        }}>
+          <div style={{
+            width: 22, height: 22, borderRadius: "50%",
+            background: i === phase ? s.color : "#0d1e32",
+            border: `1px solid ${s.color}44`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 10, color: i === phase ? "#000" : s.color,
+            fontFamily: "monospace", fontWeight: "bold",
+            transition: "all 0.3s", flexShrink: 0,
+          }}>{i + 1}</div>
+          <div style={{
+            fontSize: 12, color: i === phase ? s.color : "#334466",
+            fontFamily: "monospace", transition: "color 0.3s",
+          }}>{s.label}</div>
+          {i === phase && (
+            <div style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%", background: s.color, animation: "pulse 0.8s infinite" }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SceneRSI() {
+  const candles = useRef(generateCandles(40));
+  const closes = candles.current.map(c => c.c);
+  const rsiArr = computeRSIArr(closes);
+  const [cursor, setCursor] = useState(39);
+  const rsi = rsiArr[cursor];
+  useEffect(() => {
+    const iv = setInterval(() => setCursor(c => (c <= 15 ? 39 : c - 1)), 120);
+    return () => clearInterval(iv);
+  }, []);
+  const color = rsi <= 30 ? "#00ff88" : rsi >= 70 ? "#ff3355" : "#ffcc00";
+  const zone = rsi <= 30 ? "OVERSOLD → BUY SIGNAL" : rsi >= 70 ? "OVERBOUGHT → SELL SIGNAL" : "NEUTRAL ZONE — WAIT";
+  return (
+    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+      <CandleChart candles={candles.current.slice(0, cursor + 1)} rsiArr={rsiArr} width={320} height={110} />
+      {/* RSI line */}
+      <div style={{ background: "#060d18", borderRadius: 8, padding: "8px 12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontSize: 10, color: "#334466", fontFamily: "monospace" }}>RSI (14)</div>
+          <div style={{ fontSize: 12, color: color, fontFamily: "monospace", fontWeight: "bold" }}>{rsi}</div>
+        </div>
+        <svg width="100%" height="40" viewBox="0 0 320 40">
+          <rect x={0} y={0} width={320} height={40} fill="#06101c" rx="4" />
+          {/* Zones */}
+          <rect x={0} y={0} width={320} height={12} fill="#ff335508" />
+          <rect x={0} y={28} width={320} height={12} fill="#00ff8808" />
+          <text x={4} y={9} fill="#ff335544" fontSize="7" fontFamily="monospace">OVERBOUGHT 70</text>
+          <text x={4} y={38} fill="#00ff8844" fontSize="7" fontFamily="monospace">OVERSOLD 30</text>
+          {/* RSI line */}
+          <polyline
+            points={rsiArr.slice(0, cursor + 1).map((v, i) => `${(i / 39) * 320},${40 - (v / 100) * 40}`).join(" ")}
+            fill="none" stroke="#ff9900" strokeWidth="2" />
+          {/* Cursor dot */}
+          <circle cx={(cursor / 39) * 320} cy={40 - (rsi / 100) * 40} r="4" fill={color} />
+        </svg>
+      </div>
+      <div style={{
+        background: color + "15", border: `1px solid ${color}44`,
+        borderRadius: 8, padding: "10px 14px", textAlign: "center",
+        fontSize: 13, color, fontFamily: "monospace", fontWeight: "bold",
+      }}>{zone}</div>
+    </div>
+  );
+}
+
+function SceneMACD() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 100);
+    return () => clearInterval(iv);
+  }, []);
+  const t = tick * 0.05;
+  const macdLine = Array.from({ length: 60 }, (_, i) => Math.sin(i * 0.18 + t) * 0.003);
+  const signalLine = Array.from({ length: 60 }, (_, i) => Math.sin(i * 0.18 + t - 0.8) * 0.0025);
+  const crossIdx = macdLine.findIndex((v, i) => i > 0 && v > signalLine[i] && macdLine[i - 1] < signalLine[i - 1]);
+  const w = 320, h = 100;
+  const toY = v => h / 2 - v * 12000;
+  const pts = (arr) => arr.map((v, i) => `${(i / 59) * w},${toY(v)}`).join(" ");
+  const bullish = crossIdx !== -1 && macdLine[59] > signalLine[59];
+  return (
+    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
+        <rect width={w} height={h} fill="#060d18" rx="6" />
+        <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke="#0d1e32" strokeWidth="1" />
+        {/* Histogram */}
+        {macdLine.map((v, i) => {
+          const hist = v - signalLine[i];
+          const barH = Math.abs(hist) * 12000;
+          const col = hist > 0 ? "#00cc6644" : "#ff335544";
+          return <rect key={i} x={(i / 59) * w} y={hist > 0 ? h / 2 - barH : h / 2}
+            width={w / 60 - 0.5} height={barH} fill={col} />;
+        })}
+        <polyline points={pts(macdLine)} fill="none" stroke="#0088ff" strokeWidth="2" />
+        <polyline points={pts(signalLine)} fill="none" stroke="#ff9900" strokeWidth="1.5" />
+        {crossIdx !== -1 && (
+          <g>
+            <line x1={(crossIdx / 59) * w} y1={0} x2={(crossIdx / 59) * w} y2={h}
+              stroke="#00ff88" strokeWidth="1" strokeDasharray="3,3" opacity="0.6" />
+            <circle cx={(crossIdx / 59) * w} cy={toY(macdLine[crossIdx])} r="5"
+              fill="#00ff88" opacity="0.9" />
+          </g>
+        )}
+        {/* Legend */}
+        <rect x={4} y={4} width={6} height={6} fill="#0088ff" />
+        <text x={14} y={12} fill="#0088ff" fontSize="8" fontFamily="monospace">MACD</text>
+        <rect x={60} y={4} width={6} height={6} fill="#ff9900" />
+        <text x={70} y={12} fill="#ff9900" fontSize="8" fontFamily="monospace">SIGNAL</text>
+      </svg>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {[
+          { label: "Bullish Cross", desc: "MACD ↑ crosses above Signal", color: "#00ff88", sig: "BUY" },
+          { label: "Bearish Cross", desc: "MACD ↓ crosses below Signal", color: "#ff3355", sig: "SELL" },
+        ].map((item, i) => (
+          <div key={i} style={{
+            background: bullish === (i === 0) ? item.color + "18" : "#060d18",
+            border: `1px solid ${item.color}33`,
+            borderRadius: 8, padding: "10px",
+            transition: "background 0.5s",
+          }}>
+            <div style={{ fontSize: 11, color: item.color, fontWeight: "bold", fontFamily: "monospace" }}>{item.label}</div>
+            <div style={{ fontSize: 10, color: "#334466", marginTop: 4 }}>{item.desc}</div>
+            <div style={{
+              marginTop: 6, fontSize: 11, fontFamily: "monospace", fontWeight: "bold",
+              color: bullish === (i === 0) ? item.color : "#1e3050",
+            }}>→ {item.sig} {bullish === (i === 0) ? "✓ ACTIVE" : ""}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: "#334466", fontFamily: "monospace", textAlign: "center" }}>
+        Blue line crosses orange line = direction change
+      </div>
+    </div>
+  );
+}
+
+function SceneSignal() {
+  const [active, setActive] = useState([]);
+  const indicators = [
+    { name: "RSI", value: "27.4", status: "OVERSOLD", fire: true, color: "#00ff88" },
+    { name: "MACD", value: "Bullish X", status: "CROSSING UP", fire: true, color: "#00ff88" },
+    { name: "EMA 9/21", value: "Golden X", status: "ABOVE", fire: true, color: "#00ff88" },
+    { name: "Bollinger", value: "At Lower", status: "BOUNCING", fire: false, color: "#ffcc00" },
+    { name: "Volume", value: "1.2x avg", status: "NORMAL", fire: false, color: "#334466" },
+  ];
+  useEffect(() => {
+    let i = 0;
+    const iv = setInterval(() => {
+      setActive(prev => i < indicators.length ? [...prev, i++] : prev);
+    }, 500);
+    return () => clearInterval(iv);
+  }, []);
+  const fireCount = active.filter(i => indicators[i]?.fire).length;
+  const signal = fireCount >= 3 ? "STRONG BUY" : fireCount >= 2 ? "BUY" : fireCount >= 1 ? "WEAK BUY" : "SCANNING";
+  const sigColor = fireCount >= 3 ? "#00ff88" : fireCount >= 2 ? "#44cc88" : fireCount >= 1 ? "#4488aa" : "#334466";
+  return (
+    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 8, height: "100%" }}>
+      <div style={{ fontSize: 10, color: "#334466", fontFamily: "monospace" }}>EUR/USD @ 1.0821 — Checking all indicators...</div>
+      {indicators.map((ind, i) => (
+        <div key={i} style={{
+          display: "flex", alignItems: "center", gap: 10,
+          background: active.includes(i) ? (ind.fire ? "#00ff8810" : "#060d18") : "#040810",
+          border: `1px solid ${active.includes(i) ? (ind.fire ? "#00ff8844" : "#0d1e32") : "#060d18"}`,
+          borderRadius: 8, padding: "8px 12px",
+          transition: "all 0.4s", opacity: active.includes(i) ? 1 : 0.2,
+        }}>
+          <div style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+            background: active.includes(i) ? (ind.fire ? "#00ff8844" : "#1e3050") : "#060d18",
+            border: `1px solid ${ind.fire ? "#00ff88" : "#1e3050"}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 10, transition: "all 0.4s",
+          }}>{active.includes(i) ? (ind.fire ? "✓" : "–") : ""}</div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 12, color: ind.color, fontFamily: "monospace" }}>{ind.name}</span>
+            <span style={{ fontSize: 10, color: "#334466", marginLeft: 8 }}>{ind.value}</span>
+          </div>
+          <div style={{ fontSize: 10, color: active.includes(i) ? ind.color : "#1e3050", fontFamily: "monospace" }}>
+            {active.includes(i) ? ind.status : "..."}
+          </div>
+        </div>
+      ))}
+      <div style={{
+        background: sigColor + "20", border: `2px solid ${sigColor}`,
+        borderRadius: 10, padding: "12px", textAlign: "center",
+        animation: fireCount >= 2 ? "pulse 1s infinite" : "none",
+        marginTop: 4,
+      }}>
+        <div style={{ fontSize: 22, fontWeight: 900, color: sigColor, fontFamily: "monospace", letterSpacing: 2 }}>{signal}</div>
+        <div style={{ fontSize: 10, color: sigColor + "88", fontFamily: "monospace" }}>
+          {fireCount}/5 indicators confirmed
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SceneDeploy() {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { icon: "💻", label: "Write Python backend", sub: "main.py on your laptop", color: "#0088ff" },
+    { icon: "☁️", label: "Push to GitHub", sub: "Version control + storage", color: "#6644ff" },
+    { icon: "🚀", label: "Deploy to Render.com", sub: "Free cloud server, runs 24/7", color: "#ff6600" },
+    { icon: "⚛️", label: "React app on Vercel", sub: "Frontend hosted globally", color: "#00aaff" },
+    { icon: "📱", label: "Add to phone home screen", sub: "Works like a native app", color: "#00ff88" },
+  ];
+  useEffect(() => {
+    const iv = setInterval(() => setStep(s => (s + 1) % (steps.length + 1)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  return (
+    <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 8, height: "100%", justifyContent: "center" }}>
+      {steps.map((s, i) => (
+        <div key={i} style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: i < step ? s.color + "12" : "#060d18",
+          border: `1px solid ${i < step ? s.color + "44" : "#0d1e32"}`,
+          borderRadius: 8, padding: "10px 14px",
+          transition: "all 0.5s",
+        }}>
+          <div style={{ fontSize: 20, width: 30, textAlign: "center" }}>{s.icon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, color: i < step ? s.color : "#334466", fontFamily: "monospace", fontWeight: "bold", transition: "color 0.5s" }}>{s.label}</div>
+            <div style={{ fontSize: 10, color: "#223344", marginTop: 2 }}>{s.sub}</div>
+          </div>
+          <div style={{ fontSize: 14, color: i < step ? s.color : "#0d1e32", transition: "color 0.5s" }}>
+            {i < step ? "✓" : "○"}
+          </div>
+        </div>
+      ))}
+      {step >= steps.length && (
+        <div style={{
+          background: "#00ff8815", border: "1px solid #00ff8844",
+          borderRadius: 8, padding: "10px", textAlign: "center",
+          animation: "fadein 0.4s ease",
+        }}>
+          <div style={{ fontSize: 13, color: "#00ff88", fontFamily: "monospace", fontWeight: "bold" }}>
+            ✓ FULLY DEPLOYED — 100% FREE
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Scene map ──
+const SCENE_COMPONENTS = {
+  intro: SceneIntro,
+  architecture: SceneArchitecture,
+  dataflow: SceneDataFlow,
+  rsi: SceneRSI,
+  macd: SceneMACD,
+  signal: SceneSignal,
+  deploy: SceneDeploy,
+};
+
+// ── MAIN ──────────────────────────────────────────────────────
+export default function NexusExplainer() {
+  const [scene, setScene] = useState(0);
+  const [auto, setAuto] = useState(true);
+  const autoRef = useRef(auto);
+  autoRef.current = auto;
+
+  useEffect(() => {
+    if (!auto) return;
+    const iv = setInterval(() => {
+      if (autoRef.current) setScene(s => (s + 1) % SCENES.length);
+    }, 7000);
+    return () => clearInterval(iv);
+  }, [auto]);
+
+  const S = SCENES[scene];
+  const SceneComp = SCENE_COMPONENTS[S.id];
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#040810}
+    ::-webkit-scrollbar{display:none}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes glow{0%,100%{text-shadow:0 0 20px #0044aa}50%{text-shadow:0 0 40px #0088ff}}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{
+        fontFamily: "'Barlow Condensed',sans-serif",
+        background: "#040810",
+        minHeight: "100vh",
+        color: "#c8d8f0",
+        display: "flex",
+        flexDirection: "column",
+        maxWidth: 480,
+        margin: "0 auto",
+      }}>
+
+        {/* Header */}
+        <div style={{
+          background: "#060d18",
+          borderBottom: "1px solid #0d1e32",
+          padding: "10px 16px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div>
+            <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 11, color: "#0055aa", letterSpacing: 2 }}>
+              NEXUS TRADER
+            </div>
+            <div style={{ fontSize: 9, color: "#1e3050", fontFamily: "monospace" }}>
+              HOW IT WORKS · VISUAL GUIDE
+            </div>
+          </div>
+          <button onClick={() => setAuto(a => !a)} style={{
+            background: auto ? "#001428" : "#001428",
+            border: `1px solid ${auto ? "#004488" : "#332200"}`,
+            borderRadius: 20, color: auto ? "#0066aa" : "#554400",
+            fontSize: 10, padding: "4px 10px",
+            cursor: "pointer", fontFamily: "monospace",
+          }}>
+            {auto ? "⏸ PAUSE" : "▶ AUTO"}
+          </button>
+        </div>
+
+        {/* Scene title */}
+        <div style={{
+          padding: "12px 16px 8px",
+          borderBottom: "1px solid #060d18",
+        }}>
+          <div style={{
+            fontSize: 22, fontWeight: 900, color: "#c8d8f0", letterSpacing: 1,
+            animation: "fadein 0.3s ease",
+          }}
+            key={`title-${scene}`}>
+            {S.title}
+          </div>
+          <div style={{ fontSize: 12, color: "#334466", fontFamily: "monospace" }}>{S.subtitle}</div>
+        </div>
+
+        {/* Scene content */}
+        <div style={{ flex: 1, height: 300, overflow: "hidden" }} key={`scene-${scene}`}>
+          <SceneComp />
+        </div>
+
+        {/* Progress dots */}
+        <div style={{
+          padding: "10px 16px",
+          display: "flex", gap: 6, alignItems: "center", justifyContent: "center",
+          borderTop: "1px solid #060d18",
+        }}>
+          {SCENES.map((_, i) => (
+            <button key={i} onClick={() => { setScene(i); setAuto(false); }} style={{
+              width: i === scene ? 20 : 6,
+              height: 6,
+              borderRadius: 3,
+              background: i === scene ? "#0088ff" : i < scene ? "#003366" : "#0d1e32",
+              border: "none",
+              cursor: "pointer",
+              transition: "all 0.3s",
+              padding: 0,
+            }} />
+          ))}
+        </div>
+
+        {/* Nav buttons */}
+        <div style={{
+          padding: "0 16px 16px",
+          display: "flex", gap: 8,
+        }}>
+          <button onClick={() => { setScene(s => Math.max(0, s - 1)); setAuto(false); }}
+            disabled={scene === 0}
+            style={{
+              flex: 1, background: "#060d18",
+              border: "1px solid #0d1e32", borderRadius: 8,
+              color: scene === 0 ? "#1e3050" : "#4488aa",
+              padding: "12px", fontSize: 13,
+              cursor: scene === 0 ? "default" : "pointer",
+              fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 600,
+            }}>← PREV</button>
+
+          <div style={{
+            flex: 1, background: "#060d18",
+            border: "1px solid #0d1e32", borderRadius: 8,
+            padding: "12px", textAlign: "center",
+            fontSize: 12, color: "#1e3050", fontFamily: "monospace",
+          }}>
+            {scene + 1} / {SCENES.length}
+          </div>
+
+          <button onClick={() => { setScene(s => Math.min(SCENES.length - 1, s + 1)); setAuto(false); }}
+            disabled={scene === SCENES.length - 1}
+            style={{
+              flex: 1,
+              background: scene === SCENES.length - 1 ? "#060d18" : "linear-gradient(135deg,#003388,#0055aa)",
+              border: "1px solid #003388", borderRadius: 8,
+              color: scene === SCENES.length - 1 ? "#1e3050" : "#fff",
+              padding: "12px", fontSize: 13,
+              cursor: scene === SCENES.length - 1 ? "default" : "pointer",
+              fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 600,
+            }}>NEXT →</button>
+        </div>
+      </div>
+    </>
+  );
+}

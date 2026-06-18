@@ -1,0 +1,202 @@
+import { useState } from "react";
+
+const SAMPLE_SETUPS = [
+  { id:1, sym:"EUR/USD", side:"BUY", entry:1.0842, sl:1.0820, tp:1.0886, rr:"2.0", signal:"STRONG BUY", rsi:28.4, time:"10:15" },
+  { id:2, sym:"XAU/USD", side:"SELL", entry:2345.50, sl:2355.00, tp:2326.00, rr:"1.9", signal:"SELL", rsi:71.2, time:"09:45" },
+  { id:3, sym:"Boom 1000", side:"BUY", entry:9481.20, sl:9450.00, tp:9540.00, rr:"1.9", signal:"BUY", rsi:33.1, time:"08:30" },
+  { id:4, sym:"GBP/USD", side:"BUY", entry:1.2731, sl:1.2710, tp:1.2773, rr:"2.0", signal:"MODERATE BUY", rsi:38.5, time:"11:00" },
+];
+
+export default function CopyTrading() {
+  const [copied, setCopied] = useState(null);
+  const [format, setFormat] = useState("mt5");
+  const [filter, setFilter] = useState("ALL");
+
+  function formatSetup(s, fmt) {
+    if (fmt === "mt5") {
+      return `Symbol: ${s.sym}\nAction: ${s.side}\nEntry: ${s.entry}\nStop Loss: ${s.sl}\nTake Profit: ${s.tp}\nSignal: ${s.signal}\nRSI: ${s.rsi}\nR/R: 1:${s.rr}\nTime: ${s.time}\n\n⚠ NOT FINANCIAL ADVICE — SMONKIE TRADER`;
+    }
+    if (fmt === "telegram") {
+      return `🐒 *SMONKIE SETUP*\n${s.side==="BUY"?"🟢":"🔴"} *${s.signal} — ${s.sym}*\n\n🎯 Entry: \`${s.entry}\`\n🛑 SL: \`${s.sl}\`\n✅ TP: \`${s.tp}\`\n📊 RSI: ${s.rsi} | R/R: 1:${s.rr}\n\n⚠ Not financial advice`;
+    }
+    if (fmt === "whatsapp") {
+      return `🐒 *SMONKIE SIGNAL*\n\n*${s.side} ${s.sym}*\nEntry: ${s.entry}\nSL: ${s.sl}\nTP: ${s.tp}\nRSI: ${s.rsi} | R/R: 1:${s.rr}\n\n⚠ Not financial advice`;
+    }
+    return `${s.sym} ${s.side} @ ${s.entry} | SL: ${s.sl} | TP: ${s.tp}`;
+  }
+
+  function copy(s) {
+    navigator.clipboard.writeText(formatSetup(s, format)).then(() => {
+      setCopied(s.id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
+
+  const filtered = filter==="ALL" ? SAMPLE_SETUPS :
+    SAMPLE_SETUPS.filter(s => s.side===filter);
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  const FORMATS = [
+    { v:"mt5", label:"MT5 Format", color:"#00aaff" },
+    { v:"telegram", label:"Telegram", color:"#0088cc" },
+    { v:"whatsapp", label:"WhatsApp", color:"#25D366" },
+    { v:"simple", label:"Simple", color:"#667799" },
+  ];
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12,
+          color:"#00aaff", letterSpacing:2, marginBottom:4 }}>SMONKIE TRADER</div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>
+          📋 Copy Trade Setups
+        </div>
+        <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:20 }}>
+          One-tap copy for MT5, Telegram, or WhatsApp
+        </div>
+
+        {/* Format selector */}
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:8 }}>COPY FORMAT</div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {FORMATS.map(f => (
+              <button key={f.v} onClick={() => setFormat(f.v)} style={{
+                background: format===f.v ? f.color+"22" : "#080f1e",
+                border: `1px solid ${format===f.v ? f.color+"66" : "#0d1e32"}`,
+                borderRadius:8, color: format===f.v ? f.color : "#334466",
+                fontSize:11, padding:"6px 14px", cursor:"pointer",
+                fontFamily:"monospace", transition:"all 0.2s",
+              }}>{f.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div style={{ background:"#040810", border:"1px solid #0d1e32",
+          borderRadius:8, padding:12, marginBottom:16 }}>
+          <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:6 }}>FORMAT PREVIEW</div>
+          <pre style={{ fontSize:11, color:"#667799", fontFamily:"monospace",
+            lineHeight:1.7, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>
+            {formatSetup(SAMPLE_SETUPS[0], format)}
+          </pre>
+        </div>
+
+        {/* Filter */}
+        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+          {["ALL","BUY","SELL"].map(f => (
+            <button key={f} onClick={() => setFilter(f)} style={{
+              background: filter===f ? "#0044aa22" : "#080f1e",
+              border: `1px solid ${filter===f ? "#0044aa" : "#0d1e32"}`,
+              borderRadius:20, color: filter===f ? "#00aaff" : "#334466",
+              fontSize:11, padding:"5px 14px", cursor:"pointer",
+              fontFamily:"monospace", transition:"all 0.2s",
+            }}>{f}</button>
+          ))}
+        </div>
+
+        {/* Setup cards */}
+        {filtered.map(s => {
+          const isBuy = s.side==="BUY";
+          const col = isBuy ? "#00ff88" : "#ff4466";
+          const isCopied = copied===s.id;
+          return (
+            <div key={s.id} style={{
+              background:"#080f1e",
+              border:`1px solid ${col}22`,
+              borderLeft:`3px solid ${col}`,
+              borderRadius:10, padding:"14px", marginBottom:10,
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between",
+                alignItems:"flex-start", marginBottom:10 }}>
+                <div>
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <span style={{ fontSize:15, fontWeight:700, color:"#ddeeff" }}>{s.sym}</span>
+                    <span style={{
+                      background:col+"20", border:`1px solid ${col}44`,
+                      borderRadius:4, padding:"2px 8px",
+                      fontSize:10, color:col, fontFamily:"monospace", fontWeight:"bold",
+                    }}>{isBuy?"▲":"▼"} {s.side}</span>
+                  </div>
+                  <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginTop:3 }}>
+                    {s.signal} · RSI {s.rsi} · {s.time}
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:"#00aaff", fontFamily:"monospace" }}>
+                  1:{s.rr} R/R
+                </div>
+              </div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }}>
+                {[
+                  { label:"ENTRY", val:s.entry, color:"#00aaff" },
+                  { label:"STOP LOSS", val:s.sl, color:"#ff4466" },
+                  { label:"TAKE PROFIT", val:s.tp, color:"#00ff88" },
+                ].map(({label,val,color}) => (
+                  <div key={label} style={{ background:"#060d18", border:"1px solid #0d1e32",
+                    borderRadius:6, padding:"8px", textAlign:"center" }}>
+                    <div style={{ fontSize:8, color:"#334466", fontFamily:"monospace" }}>{label}</div>
+                    <div style={{ fontSize:11, color, fontFamily:"monospace",
+                      fontWeight:"bold", marginTop:2 }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={() => copy(s)} style={{
+                width:"100%", padding:"11px",
+                background: isCopied ? "#00ff8815" : "linear-gradient(135deg,#0044aa,#0066cc)",
+                border: `1px solid ${isCopied ? "#00ff88" : "#0044aa"}`,
+                borderRadius:8, color: isCopied ? "#00ff88" : "#fff",
+                fontSize:13, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+                transition:"all 0.2s",
+                display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              }}>
+                {isCopied ? "✓ Copied!" : "📋 Copy Setup"}
+              </button>
+            </div>
+          );
+        })}
+
+        {/* MT5 paste guide */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:10 }}>HOW TO USE IN MT5</div>
+          {[
+            "Copy the setup using button above",
+            "Open MetaTrader 5 on your device",
+            "Navigate to the correct instrument",
+            "Open a new order (F9 or New Order button)",
+            "Enter the exact Entry, SL, and TP values",
+            "Select your lot size from Risk Calculator",
+            "Review and place the trade",
+          ].map((step, i) => (
+            <div key={i} style={{ display:"flex", gap:10, padding:"6px 0",
+              borderBottom:i<6?"1px solid #06101c":"none" }}>
+              <span style={{ color:"#00aaff", fontFamily:"monospace",
+                fontSize:11, flexShrink:0, minWidth:16 }}>{i+1}.</span>
+              <span style={{ fontSize:12, color:"#667799" }}>{step}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+          textAlign:"center", marginTop:20 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,249 @@
+import { useState } from "react";
+
+const PLANS = [
+  {
+    id:"free", name:"Free", price:0, color:"#aabbdd",
+    features:[
+      {text:"5 instruments only", ok:true},
+      {text:"Basic BUY/SELL signals", ok:true},
+      {text:"1 hour chart only", ok:true},
+      {text:"RSI indicator", ok:true},
+      {text:"SMONKIE AI chat", ok:false},
+      {text:"Boom & Crash live data", ok:false},
+      {text:"Price alerts", ok:false},
+      {text:"Multi-timeframe (6 TFs)", ok:false},
+      {text:"Trade journal", ok:false},
+      {text:"Backtesting", ok:false},
+      {text:"Share signals", ok:false},
+    ],
+    cta:"Current Plan", disabled:true,
+  },
+  {
+    id:"pro", name:"Pro", price:15, color:"#00aaff", popular:true,
+    features:[
+      {text:"All 24 instruments", ok:true},
+      {text:"Advanced signals (RSI/MACD/EMA)", ok:true},
+      {text:"All 6 timeframes", ok:true},
+      {text:"All indicators + ADX", ok:true},
+      {text:"🐒 SMONKIE AI chat (unlimited)", ok:true},
+      {text:"Boom & Crash live data", ok:true},
+      {text:"Push + Telegram alerts", ok:true},
+      {text:"Multi-timeframe confluence", ok:true},
+      {text:"Trade journal + performance", ok:true},
+      {text:"Backtesting engine", ok:true},
+      {text:"Share signal cards", ok:true},
+    ],
+    cta:"Start Pro", disabled:false,
+  },
+  {
+    id:"elite", name:"Elite", price:30, color:"#bb44ff",
+    features:[
+      {text:"Everything in Pro", ok:true},
+      {text:"Real MT5 live data connection", ok:true},
+      {text:"Priority AI responses", ok:true},
+      {text:"Email + SMS alerts", ok:true},
+      {text:"Copy trade setups (1-tap)", ok:true},
+      {text:"Economic calendar integration", ok:true},
+      {text:"Volatility indices (V10-V100)", ok:true},
+      {text:"Jump indices", ok:true},
+      {text:"Priority WhatsApp support", ok:true},
+      {text:"Early access to new features", ok:true},
+      {text:"Custom instrument watchlists", ok:true},
+    ],
+    cta:"Go Elite", disabled:false,
+  },
+];
+
+export default function PricingScreen({ currentPlan="free", onSubscribe }) {
+  const [billing, setBilling] = useState("monthly");
+  const [loading, setLoading] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  const discount = billing==="annual" ? 0.8 : 1;
+
+  async function subscribe(plan) {
+    if (plan.disabled) return;
+    setLoading(plan.id);
+    await new Promise(r=>setTimeout(r,1500));
+    setLoading(null);
+    setSuccess(plan.id);
+    onSubscribe?.(plan);
+  }
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .plan-card{transition:transform 0.2s,border-color 0.2s}
+    .plan-card:hover{transform:translateY(-2px)}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", padding:"24px 16px" }}>
+
+        {/* Header */}
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:13, color:"#334466", fontFamily:"monospace",
+            letterSpacing:2, marginBottom:8 }}>SMONKIE TRADER</div>
+          <div style={{ fontSize:28, fontWeight:900, color:"#ddeeff", marginBottom:8 }}>
+            Choose Your Plan
+          </div>
+          <div style={{ fontSize:14, color:"#667799" }}>
+            Start free. Upgrade when you are ready.
+          </div>
+        </div>
+
+        {/* Billing toggle */}
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:28 }}>
+          <div style={{ display:"flex", background:"#080f1e", border:"1px solid #0d1e32",
+            borderRadius:30, padding:3 }}>
+            {["monthly","annual"].map(b => (
+              <button key={b} onClick={()=>setBilling(b)} style={{
+                padding:"8px 20px", borderRadius:24, border:"none",
+                background: billing===b ? "linear-gradient(135deg,#0044aa,#0066cc)" : "transparent",
+                color: billing===b ? "#fff" : "#334466",
+                fontSize:12, cursor:"pointer", fontFamily:"monospace",
+                transition:"all 0.2s", display:"flex", alignItems:"center", gap:6,
+              }}>
+                {b === "annual" ? "Annual" : "Monthly"}
+                {b === "annual" && (
+                  <span style={{ background:"#00ff8822", color:"#00ff88",
+                    fontSize:9, padding:"1px 6px", borderRadius:10,
+                    border:"1px solid #00ff8844" }}>-20%</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Plans */}
+        <div style={{ display:"flex", flexDirection:"column", gap:16,
+          maxWidth:480, margin:"0 auto" }}>
+          {PLANS.map(plan => (
+            <div key={plan.id} className="plan-card" style={{
+              background: plan.popular ? "#08111e" : "#080f1e",
+              border:`1px solid ${plan.popular ? plan.color+"66" : currentPlan===plan.id ? "#334466" : "#0d1e32"}`,
+              borderRadius:14, padding:"22px 20px", position:"relative",
+              boxShadow: plan.popular ? `0 0 40px ${plan.color}18` : "none",
+            }}>
+              {plan.popular && (
+                <div style={{ position:"absolute", top:-12, left:"50%",
+                  transform:"translateX(-50%)",
+                  background:"linear-gradient(135deg,#0044aa,#0066cc)",
+                  color:"#fff", fontSize:10, fontFamily:"monospace",
+                  padding:"3px 16px", borderRadius:20, letterSpacing:1,
+                  whiteSpace:"nowrap" }}>MOST POPULAR</div>
+              )}
+              {currentPlan===plan.id && (
+                <div style={{ position:"absolute", top:-12, right:16,
+                  background:"#334466", color:"#aabbdd", fontSize:9,
+                  fontFamily:"monospace", padding:"3px 10px", borderRadius:20 }}>
+                  CURRENT
+                </div>
+              )}
+
+              <div style={{ display:"flex", justifyContent:"space-between",
+                alignItems:"flex-start", marginBottom:16 }}>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:900, color:plan.color }}>
+                    {plan.name}
+                  </div>
+                  <div style={{ display:"flex", alignItems:"baseline", gap:4, marginTop:4 }}>
+                    <span style={{ fontSize:32, fontWeight:900, fontFamily:"monospace",
+                      color:"#ddeeff" }}>
+                      ${Math.round(plan.price * discount)}
+                    </span>
+                    {plan.price>0 && (
+                      <span style={{ fontSize:12, color:"#667799" }}>
+                        /{billing==="annual"?"mo (billed annually)":"month"}
+                      </span>
+                    )}
+                  </div>
+                  {billing==="annual" && plan.price>0 && (
+                    <div style={{ fontSize:11, color:"#00ff88", fontFamily:"monospace", marginTop:2 }}>
+                      Save ${Math.round(plan.price*12 - plan.price*discount*12)}/year
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize:28 }}>
+                  {plan.id==="free"?"🆓":plan.id==="pro"?"⭐":"👑"}
+                </div>
+              </div>
+
+              {/* Features */}
+              <div style={{ marginBottom:18 }}>
+                {plan.features.map((f,i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:10,
+                    padding:"6px 0", borderBottom:i<plan.features.length-1?"1px solid #06101c":"none" }}>
+                    <span style={{ color:f.ok?plan.color:"#1e3050", fontSize:13,
+                      flexShrink:0, fontWeight:"bold" }}>
+                      {f.ok?"✓":"✗"}
+                    </span>
+                    <span style={{ fontSize:13, color:f.ok?"#aabbdd":"#334466" }}>
+                      {f.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* CTA */}
+              {success===plan.id ? (
+                <div style={{ background:"#00ff8815", border:"1px solid #00ff8444",
+                  borderRadius:8, padding:"12px", textAlign:"center",
+                  fontSize:14, color:"#00ff88", fontFamily:"monospace" }}>
+                  ✓ Subscribed successfully!
+                </div>
+              ) : (
+                <button onClick={()=>subscribe(plan)} disabled={plan.disabled||loading===plan.id}
+                  style={{
+                    width:"100%", padding:"13px",
+                    background: plan.disabled ? "#0a1628" :
+                      loading===plan.id ? "#0a1628" :
+                      `linear-gradient(135deg,${plan.color}cc,${plan.color})`,
+                    border:`1px solid ${plan.disabled?"#1e3050":plan.color}`,
+                    borderRadius:10,
+                    color: plan.disabled ? "#334466" : "#fff",
+                    fontSize:14, cursor: plan.disabled?"default":"pointer",
+                    fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+                    letterSpacing:0.5, transition:"all 0.2s",
+                    display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                  }}>
+                  {loading===plan.id ? (
+                    <>
+                      <span style={{ width:14, height:14, borderRadius:"50%",
+                        border:"2px solid #334466", borderTopColor:"#0088ff",
+                        animation:"spin 0.8s linear infinite", display:"inline-block" }}/>
+                      Processing...
+                    </>
+                  ) : plan.cta}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Payment methods */}
+        <div style={{ textAlign:"center", marginTop:24 }}>
+          <div style={{ fontSize:11, color:"#1e3050", fontFamily:"monospace",
+            marginBottom:10 }}>ACCEPTED PAYMENT METHODS</div>
+          <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap" }}>
+            {["💳 Stripe","🅿 PayPal","P Payoneer","📱 EcoCash"].map(m=>(
+              <span key={m} style={{ background:"#080f1e", border:"1px solid #0d1e32",
+                borderRadius:6, padding:"5px 12px", fontSize:11,
+                color:"#334466", fontFamily:"monospace" }}>{m}</span>
+            ))}
+          </div>
+          <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace", marginTop:16 }}>
+            Cancel anytime · Secure payment · 7-day free trial on Pro
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </>
+  );
+}

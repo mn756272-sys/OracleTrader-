@@ -1,0 +1,866 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  ORACLE TRADER v1.0
+//  AI-Powered Trading Signals — Forex · Boom/Crash · Crypto
+//  Rebranded from SMONKIE TRADER
+// ══════════════════════════════════════════════════════════════
+
+const API_BASE = "http://localhost:8000";
+const REFRESH_MS = 30000;
+
+// ── Brand Config ──────────────────────────────────────────────
+const BRAND = {
+  name:    "ORACLE TRADER",
+  short:   "ORACLE",
+  version: "v1.0",
+  icon:    "🔮",
+  tagline: "AI-POWERED · ALL-SEEING · MULTI-MARKET",
+  color:   "#9944ff",
+  accent:  "#cc77ff",
+  footer:  "⚠ NOT FINANCIAL ADVICE",
+};
+
+// ── Simulated instruments ─────────────────────────────────────
+const SIMULATED = {
+  "EUR/USD":    { base:1.0842, type:"FOREX",     vol:0.0005, spike:null },
+  "GBP/USD":    { base:1.2731, type:"FOREX",     vol:0.0006, spike:null },
+  "USD/ZAR":    { base:18.640, type:"FOREX",     vol:0.012,  spike:null },
+  "USD/JPY":    { base:149.82, type:"FOREX",     vol:0.08,   spike:null },
+  "AUD/USD":    { base:0.6512, type:"FOREX",     vol:0.0004, spike:null },
+  "XAU/USD":    { base:2341.5, type:"COMMODITY", vol:0.5,    spike:null },
+  "SPY":        { base:524.60, type:"ETF",       vol:0.4,    spike:null },
+  "BTC/USD":    { base:67420,  type:"CRYPTO",    vol:180,    spike:null },
+  "ETH/USD":    { base:3520,   type:"CRYPTO",    vol:25,     spike:null },
+  "Boom 1000":  { base:9480,   type:"SYNTHETIC", vol:1.4, spike:{dir:"UP",  freq:55,mag:90}},
+  "Boom 500":   { base:9120,   type:"SYNTHETIC", vol:1.8, spike:{dir:"UP",  freq:28,mag:70}},
+  "Crash 1000": { base:9350,   type:"SYNTHETIC", vol:1.4, spike:{dir:"DOWN",freq:55,mag:90}},
+  "Crash 500":  { base:9050,   type:"SYNTHETIC", vol:1.8, spike:{dir:"DOWN",freq:28,mag:70}},
+  "Vol 75":     { base:8200,   type:"SYNTHETIC", vol:3.0, spike:null },
+};
+
+const tickCounters = {};
+Object.keys(SIMULATED).forEach(k => { tickCounters[k] = 0; });
+
+function genCandles(base, vol, count=80) {
+  let p = base;
+  return Array.from({length:count}, () => {
+    const o=p, move=(Math.random()-0.48)*vol*12;
+    const h=o+Math.random()*vol*6, l=o-Math.random()*vol*5, c=o+move;
+    p=c;
+    return {o, h:Math.max(h,o,c), l:Math.min(l,o,c), c};
+  });
+}
+
+function useSimulation() {
+  const [sim, setSim] = useState(() => {
+    const p = {};
+    Object.entries(SIMULATED).forEach(([k,cfg]) => {
+      const candles = genCandles(cfg.base, cfg.vol);
+      p[k] = { price:candles.at(-1).c, change:0, changePct:0,
+               candles, history:candles.map(c=>c.c).slice(-40),
+               spiked:false, type:cfg.type, source:"Simulated" };
+    });
+    return p;
+  });
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setSim(prev => {
+        const next = {...prev};
+        Object.entries(SIMULATED).forEach(([sym,cfg]) => {
+          const data = next[sym];
+          let delta = (Math.random()-0.499)*cfg.vol*8;
+          let spiked = false;
+          if (cfg.spike) {
+            delta += cfg.spike.dir==="UP" ? -cfg.vol*0.5 : cfg.vol*0.5;
+            if (Math.random() < 1/cfg.spike.freq) {
+              delta += cfg.spike.dir==="UP" ? cfg.spike.mag : -cfg.spike.mag;
+              spiked = true;
+            }
+          }
+          const last = data.candles.at(-1);
+          const nc = parseFloat(Math.max(cfg.base*0.5, last.c+delta)
+                     .toFixed(cfg.type==="FOREX"?4:2));
+          const newCandle = {o:last.c, h:Math.max(last.c,nc)+Math.abs(delta)*0.2,
+                             l:Math.min(last.c,nc)-Math.abs(delta)*0.2, c:nc};
+          const candles = [...data.candles.slice(1), newCandle];
+          const history = candles.map(c=>c.c).slice(-40);
+          const open = history[0];
+          const change = parseFloat((nc-open).toFixed(4));
+          const changePct = parseFloat(((change/open)*100).toFixed(3));
+          next[sym] = {...data, price:nc, change, changePct, candles, history, spiked};
+        });
+        return next;
+      });
+    }, 1600);
+    return () => clearInterval(iv);
+  }, []);
+  return sim;
+}
+
+// ── Technical Analysis ────────────────────────────────────────
+function computeRSI(candles, period=14) {
+  const closes = candles.map(c=>c.c);
+  if (closes.length < period+1) return 50;
+  let g=0, l=0;
+  for (let i=closes.length-period; i<closes.length; i++) {
+    const d = closes[i]-closes[i-1];
+    if (d>0) g+=d; else l-=d;
+  }
+  const ag=g/period, al=l/period;
+  if (al===0) return 100;
+  return parseFloat((100-100/(1+ag/al)).toFixed(1));
+}
+
+function findSwings(candles, lookback=4) {
+  const highs=[], lows=[];
+  for (let i=lookback; i<candles.length-lookback; i++) {
+    if (candles.slice(i-lookback,i).every(c=>c.h<=candles[i].h) &&
+        candles.slice(i+1,i+lookback+1).every(c=>c.h<=candles[i].h))
+      highs.push({idx:i, price:candles[i].h});
+    if (candles.slice(i-lookback,i).every(c=>c.l>=candles[i].l) &&
+        candles.slice(i+1,i+lookback+1).every(c=>c.l>=candles[i].l))
+      lows.push({idx:i, price:candles[i].l});
+  }
+  return {highs, lows};
+}
+
+function classifyStructure(highs, lows) {
+  return {
+    labeledHighs: highs.map((s,i) => ({...s,
+      label:i===0?"SH":s.price>highs[i-1].price?"HH":"LH",
+      color:i===0?"#aabbdd":s.price>highs[i-1].price?"#00ff88":"#ff4466"})),
+    labeledLows: lows.map((s,i) => ({...s,
+      label:i===0?"SL":s.price>lows[i-1].price?"HL":"LL",
+      color:i===0?"#aabbdd":s.price>lows[i-1].price?"#00ff88":"#ff4466"})),
+  };
+}
+
+function computeFib(high, low) {
+  const d = high-low;
+  return [
+    {level:0,    price:low,       label:"0%",   color:"#ff4466"},
+    {level:0.382,price:low+d*.382,label:"38.2%",color:"#ffcc00"},
+    {level:0.5,  price:low+d*.5,  label:"50%",  color:"#aabbdd"},
+    {level:0.618,price:low+d*.618,label:"61.8%",color:"#00aaff"},
+    {level:1,    price:high,      label:"100%", color:"#00ff88"},
+  ];
+}
+
+function getTrendLine(points, count) {
+  if (points.length<2) return null;
+  const [p1,p2] = points.slice(-2);
+  const slope = (p2.price-p1.price)/(p2.idx-p1.idx);
+  return {x1:p1.idx, y1:p1.price, x2:count-1, y2:p2.price+slope*(count-1-p2.idx)};
+}
+
+function getMarketBias(lH, lL) {
+  const bull = lH.slice(-3).filter(h=>h.label==="HH").length +
+               lL.slice(-3).filter(l=>l.label==="HL").length;
+  const bear = lH.slice(-3).filter(h=>h.label==="LH").length +
+               lL.slice(-3).filter(l=>l.label==="LL").length;
+  if (bull>bear) return {bias:"BULLISH",color:"#00ff88"};
+  if (bear>bull) return {bias:"BEARISH",color:"#ff4466"};
+  return {bias:"RANGING",color:"#ffcc00"};
+}
+
+function getSignal(sym, candles, rsi, spiked) {
+  const cfg = SIMULATED[sym];
+  const closes = candles.map(c=>c.c);
+  const trend = closes.at(-1)>closes.at(-6)?"UP":"DOWN";
+  if (cfg?.spike) {
+    if (cfg.spike.dir==="UP") {
+      if (spiked) return {type:"SELL",strength:"STRONG",color:"#ff4466",note:"Spike — fade it"};
+      if (rsi<=35) return {type:"BUY", strength:"STRONG",color:"#00ff88",note:"Oversold — spike incoming"};
+      return {type:"HOLD",strength:"NEUTRAL",color:"#ffcc00",note:"Wait for setup"};
+    }
+    if (spiked) return {type:"BUY", strength:"STRONG",color:"#00ff88",note:"Crash — bounce play"};
+    if (rsi>=65) return {type:"SELL",strength:"STRONG",color:"#ff4466",note:"Overbought — crash incoming"};
+    return {type:"HOLD",strength:"NEUTRAL",color:"#ffcc00",note:"Wait for setup"};
+  }
+  if (rsi<=30) return {type:"BUY", strength:"STRONG",  color:"#00ff88",note:"RSI Oversold"};
+  if (rsi>=70) return {type:"SELL",strength:"STRONG",  color:"#ff4466",note:"RSI Overbought"};
+  if (rsi<=42&&trend==="UP")   return {type:"BUY", strength:"MODERATE",color:"#44cc88",note:"Bullish momentum"};
+  if (rsi>=60&&trend==="DOWN") return {type:"SELL",strength:"MODERATE",color:"#ff6644",note:"Bearish momentum"};
+  return {type:"HOLD",strength:"NEUTRAL",color:"#ffcc00",note:"No clear signal"};
+}
+
+// ── UI Components ─────────────────────────────────────────────
+function RsiBar({value}) {
+  const c = value<=30?"#00ff88":value>=70?"#ff4466":value>=55?"#ff9944":"#6688aa";
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <div style={{flex:1,height:4,background:"#1a2235",borderRadius:2,overflow:"hidden"}}>
+        <div style={{width:`${value}%`,height:"100%",background:c,borderRadius:2,transition:"width 0.5s"}}/>
+      </div>
+      <span style={{fontSize:11,color:c,fontFamily:"monospace",minWidth:32}}>{value}</span>
+    </div>
+  );
+}
+
+function Spark({data,color,spiked}) {
+  const w=64,h=24;
+  const min=Math.min(...data),max=Math.max(...data),range=max-min||0.0001;
+  const pts=data.map((v,i)=>`${(i/(data.length-1))*w},${h-((v-min)/range)*(h-2)+1}`).join(" ");
+  return (
+    <svg width={w} height={h} style={{display:"block"}}>
+      {spiked&&<rect width={w} height={h} fill={color+"15"} rx="2"/>}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={spiked?2:1.5} strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// ── Full Technical Chart ──────────────────────────────────────
+function OracleChart({sym, data}) {
+  const [show,setShow] = useState({trend:true,sr:true,struct:true,fib:false});
+  const candles = data.candles||[];
+  if (candles.length<10) return (
+    <div style={{textAlign:"center",padding:"30px",color:"#334466",fontFamily:"monospace",fontSize:11}}>
+      Loading chart...
+    </div>
+  );
+  const W=360,CH=220,RH=50,PL=52,PR=8,PT=10,CW=W-PL-PR;
+  const allP=candles.flatMap(c=>[c.h,c.l]);
+  const minP=Math.min(...allP),maxP=Math.max(...allP),rng=maxP-minP||0.0001;
+  const bW=CW/candles.length;
+  const px=i=>PL+i*bW+bW/2;
+  const py=v=>PT+CH-((v-minP)/rng)*CH;
+  const {highs,lows}=findSwings(candles);
+  const {labeledHighs,labeledLows}=classifyStructure(highs,lows);
+  const bias=getMarketBias(labeledHighs,labeledLows);
+  const srR=highs.slice(-3).map(h=>({price:h.price,type:"R"}));
+  const srS=lows.slice(-3).map(l=>({price:l.price,type:"S"}));
+  const upTL=getTrendLine(lows.slice(-4),candles.length);
+  const dwTL=getTrendLine(highs.slice(-4),candles.length);
+  const fibH=highs.length?Math.max(...highs.slice(-2).map(h=>h.price)):maxP;
+  const fibL=lows.length?Math.min(...lows.slice(-2).map(l=>l.price)):minP;
+  const fibs=computeFib(fibH,fibL);
+  const isFx=data.type==="FOREX";
+  const fmt=v=>isFx?parseFloat(v).toFixed(4):parseFloat(v).toFixed(1);
+  const rsiArr=candles.map((_,i)=>{
+    if(i<14)return 50;
+    const sl=candles.slice(i-14,i+1).map(c=>c.c);
+    let g=0,l=0;
+    for(let j=1;j<sl.length;j++){const d=sl[j]-sl[j-1];if(d>0)g+=d;else l-=d;}
+    const ag=g/14,al=l/14;
+    return al===0?100:parseFloat((100-100/(1+ag/al)).toFixed(1));
+  });
+  const rsiPts=rsiArr.map((v,i)=>`${px(i)},${PT+CH+RH+4-((v/100)*(RH-4))}`).join(" ");
+  const totalH=PT+CH+RH+22;
+  const tcoords=line=>line?{x1:px(line.x1),y1:py(line.y1),x2:px(line.x2),y2:py(line.y2)}:null;
+  const upC=tcoords(upTL),dwC=tcoords(dwTL);
+
+  return (
+    <div style={{background:"#06101c",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+      <div style={{display:"flex",gap:4,padding:"8px 10px",borderBottom:"1px solid #0d1e32",flexWrap:"wrap"}}>
+        {[{k:"trend",label:"Trend",color:"#9944ff"},{k:"sr",label:"S/R",color:"#ffcc00"},
+          {k:"struct",label:"HH/LL",color:"#00aaff"},{k:"fib",label:"Fib",color:"#00ff88"}].map(b=>(
+          <button key={b.k} onClick={()=>setShow(p=>({...p,[b.k]:!p[b.k]}))} style={{
+            background:show[b.k]?b.color+"22":"#080f1e",
+            border:`1px solid ${show[b.k]?b.color+"66":"#0d1e32"}`,
+            borderRadius:20,color:show[b.k]?b.color:"#334466",
+            fontSize:10,padding:"3px 10px",cursor:"pointer",fontFamily:"monospace",
+          }}>{b.label}</button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:bias.color}}/>
+          <span style={{fontSize:10,color:bias.color,fontFamily:"monospace"}}>{bias.bias}</span>
+        </div>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${totalH}`} style={{display:"block"}}>
+        <defs><clipPath id="cc2"><rect x={PL} y={PT} width={CW} height={CH}/></clipPath></defs>
+        <rect x={PL} y={PT} width={CW} height={CH} fill="#04080f" rx="2"/>
+        {[0,.25,.5,.75,1].map((f,i)=>{
+          const pv=maxP-f*rng,yp=PT+f*CH;
+          return(<g key={i}>
+            <line x1={PL} y1={yp} x2={PL+CW} y2={yp} stroke="#0a1830" strokeWidth="0.5" strokeDasharray="3,6"/>
+            <text x={PL-3} y={yp+3} textAnchor="end" fill="#223344" fontSize="7" fontFamily="monospace">{fmt(pv)}</text>
+          </g>);
+        })}
+        {show.fib&&fibs.map((fib,i)=>{
+          const yf=py(fib.price);
+          if(yf<PT||yf>PT+CH)return null;
+          return(<g key={i}>
+            <line x1={PL} y1={yf} x2={PL+CW} y2={yf} stroke={fib.color} strokeWidth="0.6" strokeDasharray="2,5" opacity="0.5"/>
+            <text x={PL+CW-2} y={yf-1} textAnchor="end" fill={fib.color} fontSize="6" fontFamily="monospace" opacity="0.8">{fib.label}</text>
+          </g>);
+        })}
+        {show.sr&&[...srR,...srS].map((sr,i)=>{
+          const ys=py(sr.price);
+          if(ys<PT||ys>PT+CH)return null;
+          const col=sr.type==="R"?"#ff4466":"#00ff88";
+          return(<g key={i}>
+            <line x1={PL} y1={ys} x2={PL+CW} y2={ys} stroke={col} strokeWidth="0.8" strokeDasharray="4,4" opacity="0.7"/>
+            <rect x={PL} y={ys-7} width={14} height={8} fill={col+"22"} rx="1"/>
+            <text x={PL+7} y={ys-1} textAnchor="middle" fill={col} fontSize="6" fontFamily="monospace" fontWeight="bold">{sr.type}</text>
+          </g>);
+        })}
+        {show.trend&&upC&&<g clipPath="url(#cc2)">
+          <line x1={upC.x1} y1={upC.y1} x2={upC.x2} y2={upC.y2} stroke="#00ff88" strokeWidth="1.2" strokeDasharray="5,3" opacity="0.8"/>
+        </g>}
+        {show.trend&&dwC&&<g clipPath="url(#cc2)">
+          <line x1={dwC.x1} y1={dwC.y1} x2={dwC.x2} y2={dwC.y2} stroke="#ff4466" strokeWidth="1.2" strokeDasharray="5,3" opacity="0.8"/>
+        </g>}
+        <g clipPath="url(#cc2)">
+          {candles.map((c,i)=>{
+            const x=px(i),up=c.c>=c.o;
+            const col=data.spiked&&i===candles.length-1?"#9944ff":up?"#00cc66":"#ff3355";
+            const bT=py(Math.max(c.o,c.c)),bB=py(Math.min(c.o,c.c));
+            return(<g key={i}>
+              <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)} stroke={col} strokeWidth="0.7"/>
+              <rect x={x-bW*.38} y={bT} width={bW*.76} height={Math.max(bB-bT,1)} fill={col+"55"} stroke={col} strokeWidth="0.7" rx="0.3"/>
+            </g>);
+          })}
+        </g>
+        {show.struct&&labeledHighs.slice(-6).map((h,i)=>{
+          const xH=px(h.idx),yH=py(h.price)-10;
+          if(xH<PL||xH>PL+CW||yH<PT-2)return null;
+          return(<g key={i}>
+            <circle cx={xH} cy={py(h.price)} r="2.5" fill={h.color} opacity="0.9"/>
+            <rect x={xH-8} y={yH-7} width={16} height={8} fill="#04080f" opacity="0.85" rx="2"/>
+            <text x={xH} y={yH} textAnchor="middle" fill={h.color} fontSize="7" fontFamily="monospace" fontWeight="bold">{h.label}</text>
+          </g>);
+        })}
+        {show.struct&&labeledLows.slice(-6).map((l,i)=>{
+          const xL=px(l.idx),yL=py(l.price)+16;
+          if(xL<PL||xL>PL+CW||yL>PT+CH+4)return null;
+          return(<g key={i}>
+            <circle cx={xL} cy={py(l.price)} r="2.5" fill={l.color} opacity="0.9"/>
+            <rect x={xL-8} y={yL-7} width={16} height={8} fill="#04080f" opacity="0.85" rx="2"/>
+            <text x={xL} y={yL} textAnchor="middle" fill={l.color} fontSize="7" fontFamily="monospace" fontWeight="bold">{l.label}</text>
+          </g>);
+        })}
+        {(()=>{const curY=py(data.price);const col=data.changePct>=0?"#00ff88":"#ff4466";return(<g>
+          <line x1={PL} y1={curY} x2={PL+CW} y2={curY} stroke={col} strokeWidth="0.6" strokeDasharray="2,4" opacity="0.9"/>
+          <rect x={PL+CW} y={curY-6} width={48} height={12} fill={col+"33"} rx="2"/>
+          <text x={PL+CW+2} y={curY+3} fill={col} fontSize="7" fontFamily="monospace">{fmt(data.price)}</text>
+        </g>);})()}
+        <line x1={PL} y1={PT+CH+4} x2={PL+CW} y2={PT+CH+4} stroke="#0d1e32" strokeWidth="1"/>
+        <rect x={PL} y={PT+CH+4} width={CW} height={RH} fill="#030710" opacity="0.8"/>
+        <text x={PL-3} y={PT+CH+10} textAnchor="end" fill="#334466" fontSize="6" fontFamily="monospace">RSI</text>
+        <line x1={PL} y1={PT+CH+4+RH*.3} x2={PL+CW} y2={PT+CH+4+RH*.3} stroke="#ff446620" strokeWidth="0.5"/>
+        <line x1={PL} y1={PT+CH+4+RH*.7} x2={PL+CW} y2={PT+CH+4+RH*.7} stroke="#00ff8820" strokeWidth="0.5"/>
+        <polyline points={rsiPts} fill="none" stroke="#cc77ff" strokeWidth="1.2" opacity="0.9"/>
+        {(()=>{const rv=rsiArr.at(-1),rc=rv<=30?"#00ff88":rv>=70?"#ff4466":"#cc77ff";
+          return<text x={PL-3} y={PT+CH+RH} textAnchor="end" fill={rc} fontSize="7" fontFamily="monospace">{rv}</text>;})()}
+      </svg>
+    </div>
+  );
+}
+
+// ── AI Chat ───────────────────────────────────────────────────
+async function askOracle(messages, snapshot) {
+  const sys = `You are ORACLE, an elite AI trading analyst with all-seeing market intelligence. You specialise in technical analysis — trend lines, support/resistance, market structure (HH/HL/LH/LL), Fibonacci, RSI, MACD. You also cover Boom & Crash synthetic indices and crypto.
+
+Live market data:
+${snapshot}
+
+Rules:
+- Max 130 words. Be sharp and authoritative.
+- Reference market structure in analysis.
+- Give entry, stop loss, and take profit for trade setups.
+- Never guarantee returns. Risk 1-2% per trade max.
+- Speak like an expert Oracle — confident and precise.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,
+      messages:messages.map(m=>({role:m.role,content:m.content})),
+    }),
+  });
+  const d = await res.json();
+  return d.content?.[0]?.text || "Oracle signal unavailable.";
+}
+
+const TYPE_CFG = {
+  FOREX:    {color:"#00aaff", icon:"💱"},
+  SYNTHETIC:{color:"#9944ff", icon:"⚡"},
+  COMMODITY:{color:"#ffaa00", icon:"🥇"},
+  ETF:      {color:"#00ff88", icon:"📈"},
+  CRYPTO:   {color:"#ff9944", icon:"₿"},
+};
+const CATS = ["ALL","FOREX","SYNTHETIC","COMMODITY","ETF","CRYPTO"];
+
+// ══════════════════════════════════════════════════════════════
+export default function OracleTrader() {
+  const sim = useSimulation();
+  const [prices,setPrices] = useState({});
+  const [connStatus,setConn] = useState("connecting");
+  const [isLive,setIsLive] = useState(false);
+  const [lastUpdate,setLast] = useState(null);
+  const [tab,setTab] = useState("markets");
+  const [cat,setCat] = useState("ALL");
+  const [chartSym,setChartSym] = useState("EUR/USD");
+  const [signals,setSignals] = useState([]);
+  const [messages,setMessages] = useState([{
+    role:"assistant",
+    content:`${BRAND.icon} ORACLE online. All-seeing market intelligence activated.\n\nI cover Forex, Boom & Crash indices, Crypto, and Gold. Ask me for signals, technical analysis, or trade setups.`,
+  }]);
+  const [input,setInput] = useState("");
+  const [loading,setLoading] = useState(false);
+  const chatEnd = useRef(null);
+
+  useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth"})},[messages]);
+
+  const fetchLive = useCallback(async()=>{
+    try {
+      const res = await fetch(`${API_BASE}/prices`,{signal:AbortSignal.timeout(8000)});
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if(Object.keys(data).length>0){
+        setPrices(data);setConn("live");setIsLive(true);
+        setLast(new Date().toLocaleTimeString());
+      }
+    } catch {
+      setConn("simulated");setIsLive(false);
+    }
+  },[]);
+
+  useEffect(()=>{
+    fetchLive();
+    const iv=setInterval(fetchLive,REFRESH_MS);
+    return()=>clearInterval(iv);
+  },[fetchLive]);
+
+  const displayPrices = isLive ? prices : sim;
+
+  useEffect(()=>{
+    if(Object.keys(displayPrices).length===0)return;
+    const ns=[];
+    Object.entries(displayPrices).forEach(([sym,data])=>{
+      if(!data.candles||data.candles.length<10)return;
+      const rsi=computeRSI(data.candles);
+      const sig=getSignal(sym,data.candles,rsi,data.spiked);
+      if(sig.type!=="HOLD"||data.spiked){
+        ns.push({sym,rsi,sig,price:data.price,spiked:data.spiked,type:data.type,
+          time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+          id:`${sym}-${Date.now()}`});
+      }
+    });
+    if(ns.length>0)setSignals(p=>[...ns,...p].slice(0,30));
+  },[displayPrices]);
+
+  function buildSnapshot(){
+    return Object.entries(displayPrices).map(([sym,d])=>{
+      if(!d.candles||d.candles.length<5)return`${sym}: loading`;
+      const rsi=computeRSI(d.candles);
+      const sig=getSignal(sym,d.candles,rsi,d.spiked);
+      return`${sym}(${d.type}): ${d.price} ${d.changePct>0?"+":""}${d.changePct}% RSI:${rsi} ${sig.type}${d.spiked?" ⚡SPIKE":""}`;
+    }).join("\n");
+  }
+
+  async function sendMessage(){
+    const text=input.trim();
+    if(!text||loading)return;
+    const userMsg={role:"user",content:text};
+    const updated=[...messages,userMsg];
+    setMessages(updated);setInput("");setLoading(true);
+    try{
+      const reply=await askOracle(updated,buildSnapshot());
+      setMessages(p=>[...p,{role:"assistant",content:reply}]);
+    }catch{
+      setMessages(p=>[...p,{role:"assistant",content:"⚠ Oracle signal lost. Retry."}]);
+    }
+    setLoading(false);
+  }
+
+  const filtered=Object.entries(displayPrices).filter(([,d])=>
+    cat==="ALL"||d.type===cat);
+
+  const connCfg={
+    live:      {color:"#00ff88",label:"LIVE",dot:true},
+    simulated: {color:"#ffcc00",label:"SIM",dot:false},
+    connecting:{color:"#334466",label:"...",dot:false},
+  }[connStatus];
+
+  const TABS=[
+    {id:"markets",label:"Markets",icon:"◈"},
+    {id:"chart",  label:"Chart",  icon:"📊"},
+    {id:"signals",label:"Signals",icon:"◎"},
+    {id:"oracle", label:"ORACLE", icon:"🔮"},
+  ];
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    ::-webkit-scrollbar{width:3px}
+    ::-webkit-scrollbar-track{background:#060d18}
+    ::-webkit-scrollbar-thumb{background:#2a1a4a}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+    @keyframes slidein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes glow{0%,100%{filter:drop-shadow(0 0 8px #9944ff)}50%{filter:drop-shadow(0 0 20px #cc77ff)}}
+    .slidein{animation:slidein 0.25s ease}
+    .oracle-glow{animation:glow 3s ease-in-out infinite}
+    input:focus{outline:none;border-color:#6622cc !important}
+    input::placeholder{color:#233344}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",display:"flex",flexDirection:"column",
+        maxWidth:520,margin:"0 auto"}}>
+
+        {/* HEADER */}
+        <div style={{background:"linear-gradient(180deg,#0a0620,#060d18)",
+          borderBottom:"1px solid #1a0a2e",padding:"12px 16px",
+          display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
+          <div className="oracle-glow" style={{
+            width:42,height:42,borderRadius:12,fontSize:22,
+            background:"linear-gradient(135deg,#1a0040,#2d0060)",
+            border:"1px solid #6622cc55",
+            display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {BRAND.icon}
+          </div>
+          <div>
+            <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:15,
+              color:BRAND.color,letterSpacing:2}}>{BRAND.name}</div>
+            <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",letterSpacing:1}}>
+              {BRAND.tagline}
+            </div>
+          </div>
+          <div style={{marginLeft:"auto",textAlign:"right"}}>
+            <div style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+              {connCfg.dot&&<div style={{width:7,height:7,borderRadius:"50%",
+                background:connCfg.color,animation:"pulse 2s infinite"}}/>}
+              <span style={{fontSize:10,color:connCfg.color,fontFamily:"monospace"}}>
+                {connCfg.label}
+              </span>
+            </div>
+            {lastUpdate&&<div style={{fontSize:8,color:"#1e3050",fontFamily:"monospace",marginTop:1}}>{lastUpdate}</div>}
+          </div>
+        </div>
+
+        {/* OFFLINE BANNER */}
+        {!isLive&&connStatus==="simulated"&&(
+          <div style={{background:"#110a00",borderBottom:"1px solid #443300",
+            padding:"6px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:10,color:"#aa7700",fontFamily:"monospace"}}>
+              ⚠ Backend offline — simulated data
+            </span>
+            <button onClick={fetchLive} style={{background:"none",border:"1px solid #443300",
+              borderRadius:4,color:"#aa7700",fontSize:9,padding:"2px 8px",
+              cursor:"pointer",fontFamily:"monospace"}}>Retry</button>
+          </div>
+        )}
+
+        {/* TICKER TAPE */}
+        <div style={{background:"#06101e",borderBottom:"1px solid #0a1830",
+          padding:"5px 16px",display:"flex",gap:16,overflowX:"auto",scrollbarWidth:"none"}}>
+          {Object.entries(displayPrices).slice(0,8).map(([sym,d])=>{
+            const tc=TYPE_CFG[d.type]||{};
+            return(
+              <div key={sym} style={{display:"flex",gap:4,alignItems:"baseline",flexShrink:0}}>
+                <span style={{fontSize:9,color:tc.color+"88",fontFamily:"monospace"}}>{sym}</span>
+                <span style={{fontSize:10,color:"#aabbdd",fontFamily:"monospace"}}>{d.price}</span>
+                <span style={{fontSize:9,color:d.changePct>=0?"#00ff88":"#ff4466",fontFamily:"monospace"}}>
+                  {d.changePct>=0?"+":""}{d.changePct}%
+                </span>
+                {d.spiked&&<span style={{fontSize:9,color:"#9944ff"}}>⚡</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* TABS */}
+        <div style={{display:"flex",background:"#060d18",borderBottom:"1px solid #1a0a2e"}}>
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{
+              flex:1,background:"none",border:"none",
+              borderBottom:tab===t.id?`2px solid ${BRAND.color}`:"2px solid transparent",
+              color:tab===t.id?BRAND.color:"#334466",
+              padding:"10px 2px",fontSize:11,
+              fontFamily:"'Rajdhani',sans-serif",fontWeight:600,
+              cursor:"pointer",display:"flex",gap:4,
+              alignItems:"center",justifyContent:"center",transition:"all 0.2s",
+            }}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* CONTENT */}
+        <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+
+          {/* ── MARKETS ── */}
+          {tab==="markets"&&(
+            <div style={{overflowY:"auto",padding:12}}>
+              <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",scrollbarWidth:"none"}}>
+                {CATS.map(c=>{
+                  const tc=TYPE_CFG[c]||{color:BRAND.color};
+                  const active=cat===c;
+                  return(
+                    <button key={c} onClick={()=>setCat(c)} style={{
+                      background:active?tc.color+"22":"#080f1e",
+                      border:`1px solid ${active?tc.color+"88":"#0d1e32"}`,
+                      borderRadius:20,color:active?tc.color:"#334466",
+                      fontSize:11,padding:"5px 12px",cursor:"pointer",
+                      whiteSpace:"nowrap",fontFamily:"monospace",flexShrink:0,
+                    }}>{c}</button>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:8,letterSpacing:1}}>
+                ◈ {filtered.length} INSTRUMENTS · {isLive?"REAL DATA":"SIMULATED"}
+              </div>
+              {filtered.map(([sym,data])=>{
+                if(!data.candles||data.candles.length<5)return null;
+                const rsi=computeRSI(data.candles);
+                const sig=getSignal(sym,data.candles,rsi,data.spiked);
+                const tc=TYPE_CFG[data.type]||{};
+                const up=data.changePct>=0;
+                const hist=data.history||data.candles.map(c=>c.c).slice(-30);
+                return(
+                  <div key={sym} onClick={()=>{setChartSym(sym);setTab("chart");}}
+                    style={{background:"#080f1e",
+                      border:`1px solid ${data.spiked?"#9944ff44":"#0d1e32"}`,
+                      borderLeft:`3px solid ${tc.color}44`,
+                      borderRadius:8,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                      <div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:13}}>{tc.icon}</span>
+                          <span style={{fontSize:14,fontWeight:700,color:"#ddeeff"}}>{sym}</span>
+                          {data.spiked&&<span style={{background:"#9944ff22",border:"1px solid #9944ff55",
+                            borderRadius:4,padding:"1px 6px",fontSize:9,color:"#9944ff",fontFamily:"monospace"}}>⚡SPIKE</span>}
+                          {isLive&&<span style={{fontSize:8,color:"#00ff8855",fontFamily:"monospace"}}>●LIVE</span>}
+                        </div>
+                        <div style={{fontSize:9,color:tc.color+"88",fontFamily:"monospace",marginTop:2}}>{data.type}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:15,fontWeight:700,color:"#ddeeff",fontFamily:"'Share Tech Mono',monospace"}}>{data.price}</div>
+                        <div style={{fontSize:10,color:up?"#00ff88":"#ff4466",fontFamily:"monospace"}}>{up?"▲ +":"▼ "}{data.changePct}%</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:9,color:"#334466",marginBottom:3,fontFamily:"monospace"}}>RSI</div>
+                        <RsiBar value={rsi}/>
+                      </div>
+                      <Spark data={hist.slice(-30)} color={up?"#00ff88":"#ff4466"} spiked={data.spiked}/>
+                      <div style={{background:sig.color+"18",border:`1px solid ${sig.color}44`,
+                        borderRadius:4,padding:"4px 8px",fontSize:11,
+                        color:sig.color,fontFamily:"monospace",fontWeight:"bold",
+                        minWidth:48,textAlign:"center"}}>{sig.type}</div>
+                    </div>
+                    <div style={{marginTop:5,fontSize:9,color:"#1e3050",fontFamily:"monospace"}}>
+                      Tap to view Oracle chart →
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── CHART ── */}
+          {tab==="chart"&&(
+            <div style={{overflowY:"auto",padding:12}}>
+              <div style={{display:"flex",gap:5,marginBottom:10,overflowX:"auto",scrollbarWidth:"none"}}>
+                {Object.keys(displayPrices).map(sym=>{
+                  const tc=TYPE_CFG[displayPrices[sym]?.type]||{};
+                  return(
+                    <button key={sym} onClick={()=>setChartSym(sym)} style={{
+                      background:chartSym===sym?tc.color+"22":"#080f1e",
+                      border:`1px solid ${chartSym===sym?tc.color+"77":"#0d1e32"}`,
+                      borderRadius:20,color:chartSym===sym?tc.color:"#334466",
+                      fontSize:10,padding:"4px 10px",cursor:"pointer",
+                      whiteSpace:"nowrap",fontFamily:"monospace",flexShrink:0,
+                    }}>{sym}</button>
+                  );
+                })}
+              </div>
+              {displayPrices[chartSym]&&(()=>{
+                const data=displayPrices[chartSym];
+                if(!data.candles||data.candles.length<10)return(
+                  <div style={{textAlign:"center",padding:"30px",color:"#334466",fontFamily:"monospace"}}>Loading...</div>
+                );
+                const rsi=computeRSI(data.candles);
+                const sig=getSignal(chartSym,data.candles,rsi,data.spiked);
+                const tc=TYPE_CFG[data.type]||{};
+                const up=data.changePct>=0;
+                const {highs,lows}=findSwings(data.candles);
+                const {labeledHighs,labeledLows}=classifyStructure(highs,lows);
+                const bias=getMarketBias(labeledHighs,labeledLows);
+                return(
+                  <>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <div>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{fontSize:16}}>{tc.icon}</span>
+                          <span style={{fontSize:17,fontWeight:700,color:"#ddeeff"}}>{chartSym}</span>
+                          {isLive&&<span style={{fontSize:8,color:"#00ff88",fontFamily:"monospace"}}>●LIVE</span>}
+                        </div>
+                        <div style={{fontSize:20,fontFamily:"'Share Tech Mono',monospace",color:sig.color,fontWeight:700}}>
+                          {data.price}
+                          <span style={{fontSize:11,color:up?"#00ff88":"#ff4466",marginLeft:8,fontFamily:"monospace"}}>
+                            {up?"▲ +":"▼ "}{data.changePct}%
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{background:sig.color+"20",border:`1px solid ${sig.color}55`,
+                          borderRadius:6,padding:"6px 14px",marginBottom:4,
+                          fontSize:15,color:sig.color,fontFamily:"monospace",fontWeight:"bold"}}>{sig.type}</div>
+                        <div style={{display:"flex",gap:4,alignItems:"center",justifyContent:"flex-end"}}>
+                          <div style={{width:6,height:6,borderRadius:"50%",background:bias.color}}/>
+                          <span style={{fontSize:10,color:bias.color,fontFamily:"monospace"}}>{bias.bias}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <OracleChart sym={chartSym} data={data}/>
+                    <div style={{background:sig.color+"10",border:`1px solid ${sig.color}33`,
+                      borderRadius:8,padding:"10px 14px",fontSize:12,color:sig.color,fontFamily:"monospace"}}>
+                      🔮 Oracle says: {sig.note}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ── SIGNALS ── */}
+          {tab==="signals"&&(
+            <div style={{overflowY:"auto",padding:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",letterSpacing:1}}>
+                  ◎ ORACLE SIGNAL FEED
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:BRAND.color,animation:"pulse 1.5s infinite"}}/>
+                  <span style={{fontSize:9,color:BRAND.color,fontFamily:"monospace"}}>SCANNING</span>
+                </div>
+              </div>
+              {signals.length===0&&(
+                <div style={{textAlign:"center",padding:"48px 20px",color:"#334466",fontFamily:"monospace",fontSize:12}}>
+                  <div style={{fontSize:32,marginBottom:12}}>🔮</div>
+                  Oracle is scanning markets...<br/>Signals appear automatically.
+                </div>
+              )}
+              {signals.map(s=>{
+                const tc=TYPE_CFG[s.type]||{};
+                return(
+                  <div key={s.id} className="slidein" style={{
+                    background:"#080f1e",
+                    border:`1px solid ${s.spiked?"#9944ff44":s.sig.color+"33"}`,
+                    borderLeft:`3px solid ${s.spiked?"#9944ff":s.sig.color}`,
+                    borderRadius:8,padding:"12px 14px",marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{background:s.sig.color+"20",border:`1px solid ${s.sig.color}50`,
+                          color:s.sig.color,fontSize:10,fontWeight:"bold",fontFamily:"monospace",
+                          padding:"2px 8px",borderRadius:3}}>{s.sig.type}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"#ddeeff"}}>{s.sym}</span>
+                        <span style={{fontSize:9,color:tc.color+"88"}}>{tc.icon}</span>
+                        {s.spiked&&<span style={{fontSize:11,color:"#9944ff"}}>⚡</span>}
+                      </div>
+                      <span style={{fontSize:9,color:"#334466",fontFamily:"monospace"}}>{s.time}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#667799"}}>
+                      <span>Price <span style={{color:"#aabbdd",fontFamily:"monospace"}}>{s.price}</span></span>
+                      <span>RSI <span style={{color:s.sig.color,fontFamily:"monospace"}}>{s.rsi}</span></span>
+                      <span style={{color:"#445566"}}>{s.sig.strength}</span>
+                    </div>
+                    <div style={{fontSize:10,color:"#334466",marginTop:4,fontFamily:"monospace"}}>🔮 {s.sig.note}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── ORACLE AI ── */}
+          {tab==="oracle"&&(
+            <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+              <div style={{padding:"8px 12px 0",display:"flex",gap:6,overflowX:"auto",scrollbarWidth:"none"}}>
+                {["Best signal now?","Boom 1000 setup?","EUR/USD analysis","BTC outlook?","Gold Fibonacci"].map((q,i)=>(
+                  <button key={i} onClick={()=>setInput(q)} style={{
+                    background:"#0a0620",border:"1px solid #1a0a2e",
+                    borderRadius:20,color:"#6644aa",fontSize:11,
+                    padding:"5px 12px",cursor:"pointer",whiteSpace:"nowrap",
+                    fontFamily:"'Rajdhani',sans-serif",flexShrink:0,
+                  }}>{q}</button>
+                ))}
+              </div>
+              <div style={{flex:1,overflowY:"auto",padding:"12px 12px 0"}}>
+                {messages.map((m,i)=>(
+                  <div key={i} className={i>0?"slidein":""} style={{
+                    marginBottom:12,display:"flex",
+                    flexDirection:m.role==="user"?"row-reverse":"row",
+                    gap:8,alignItems:"flex-start"}}>
+                    {m.role==="assistant"&&(
+                      <div className="oracle-glow" style={{
+                        width:32,height:32,borderRadius:10,flexShrink:0,fontSize:18,
+                        background:"linear-gradient(135deg,#1a0040,#2d0060)",
+                        border:"1px solid #6622cc44",
+                        display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {BRAND.icon}
+                      </div>
+                    )}
+                    <div style={{maxWidth:"83%",
+                      background:m.role==="user"?"#0d0520":"#080f1e",
+                      border:`1px solid ${m.role==="user"?"#1a0a2e":"#0d1e32"}`,
+                      borderRadius:m.role==="user"?"12px 12px 2px 12px":"12px 12px 12px 2px",
+                      padding:"10px 13px",fontSize:13,color:"#aabbd0",
+                      lineHeight:1.65,fontFamily:"'Rajdhani',sans-serif",whiteSpace:"pre-wrap"}}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+                {loading&&(
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <div style={{width:32,height:32,borderRadius:10,fontSize:18,
+                      background:"linear-gradient(135deg,#1a0040,#2d0060)",
+                      border:"1px solid #6622cc44",
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      {BRAND.icon}
+                    </div>
+                    <div style={{background:"#080f1e",border:"1px solid #0d1e32",
+                      borderRadius:"12px 12px 12px 2px",padding:"14px 18px",
+                      display:"flex",gap:5,alignItems:"center"}}>
+                      {[0,1,2].map(j=>(
+                        <div key={j} style={{width:6,height:6,borderRadius:"50%",
+                          background:BRAND.color,animation:`pulse 1.2s ${j*.2}s infinite`}}/>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEnd}/>
+              </div>
+              <div style={{padding:"10px 12px 12px",background:"#060d18",
+                borderTop:"1px solid #1a0a2e",display:"flex",gap:8}}>
+                <input value={input} onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&sendMessage()}
+                  placeholder="Ask the Oracle anything..."
+                  style={{flex:1,background:"#080f1e",border:"1px solid #1a0a2e",
+                    borderRadius:8,color:"#aabbd0",padding:"10px 14px",
+                    fontSize:13,fontFamily:"'Rajdhani',sans-serif"}}/>
+                <button onClick={sendMessage} disabled={loading||!input.trim()} style={{
+                  background:loading||!input.trim()?"#0a0620":`linear-gradient(135deg,${BRAND.color},#7722ee)`,
+                  border:`1px solid ${BRAND.color}`,borderRadius:8,
+                  color:loading||!input.trim()?"#334466":"#fff",
+                  padding:"10px 16px",fontSize:16,
+                  cursor:loading||!input.trim()?"default":"pointer",
+                  transition:"all 0.2s",fontFamily:"monospace"}}>
+                  {loading?"…":"▶"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* FOOTER */}
+        <div style={{borderTop:"1px solid #1a0a2e",padding:"7px 16px",
+          display:"flex",justifyContent:"space-between",
+          fontSize:9,color:"#1e3050",fontFamily:"monospace"}}>
+          <span>{BRAND.icon} {BRAND.name} {BRAND.version}</span>
+          <span style={{color:isLive?"#00ff8844":"#ffcc0044"}}>{isLive?"REAL DATA":"SIMULATED"}</span>
+          <span>{new Date().toLocaleTimeString()}</span>
+        </div>
+      </div>
+    </>
+  );
+}

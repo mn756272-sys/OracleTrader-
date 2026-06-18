@@ -1,0 +1,422 @@
+import { useState, useMemo } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  ORACLE TRADER — MARKET SCREENER
+//  Filter and sort all instruments by RSI, signal, trend,
+//  type, and custom conditions — like TradingView screener
+// ══════════════════════════════════════════════════════════════
+
+// ── Sample instrument data (replace with real API data) ───────
+const SAMPLE_DATA = [
+  { sym:"EUR/USD",   type:"FOREX",    price:1.0842, changePct:0.12,  rsi:28.4, signal:"BUY",  strength:"STRONG",  bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"HIGH",   atr:0.0008 },
+  { sym:"GBP/USD",   type:"FOREX",    price:1.2731, changePct:0.08,  rsi:45.2, signal:"HOLD", strength:"NEUTRAL", bias:"RANGING", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:0.0010 },
+  { sym:"USD/ZAR",   type:"FOREX",    price:18.640, changePct:-0.21, rsi:71.4, signal:"SELL", strength:"STRONG",  bias:"BEARISH", macd:"BEAR", ema:"BELOW", volume:"HIGH",   atr:0.120  },
+  { sym:"USD/JPY",   type:"FOREX",    price:149.82, changePct:0.05,  rsi:55.1, signal:"HOLD", strength:"NEUTRAL", bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:0.450  },
+  { sym:"AUD/USD",   type:"FOREX",    price:0.6512, changePct:-0.14, rsi:38.7, signal:"BUY",  strength:"MODERATE",bias:"RANGING", macd:"BEAR", ema:"BELOW", volume:"LOW",    atr:0.0006 },
+  { sym:"XAU/USD",   type:"COMMODITY",price:2341.5, changePct:0.34,  rsi:66.8, signal:"SELL", strength:"MODERATE",bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"HIGH",   atr:12.50  },
+  { sym:"SPY",       type:"ETF",      price:524.60, changePct:0.19,  rsi:52.3, signal:"HOLD", strength:"NEUTRAL", bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:3.20   },
+  { sym:"LIT",       type:"ETF",      price:43.20,  changePct:-0.44, rsi:31.2, signal:"BUY",  strength:"MODERATE",bias:"RANGING", macd:"BEAR", ema:"BELOW", volume:"LOW",    atr:0.85   },
+  { sym:"BTC/USD",   type:"CRYPTO",   price:67420,  changePct:2.10,  rsi:62.4, signal:"BUY",  strength:"MODERATE",bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"HIGH",   atr:1240   },
+  { sym:"ETH/USD",   type:"CRYPTO",   price:3520,   changePct:1.85,  rsi:58.9, signal:"HOLD", strength:"NEUTRAL", bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:85.00  },
+  { sym:"XRP/USD",   type:"CRYPTO",   price:0.5821, changePct:-0.92, rsi:42.1, signal:"HOLD", strength:"NEUTRAL", bias:"RANGING", macd:"BEAR", ema:"BELOW", volume:"LOW",    atr:0.012  },
+  { sym:"Boom 1000", type:"SYNTHETIC",price:9481,   changePct:0.44,  rsi:33.4, signal:"BUY",  strength:"STRONG",  bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"HIGH",   atr:22.00  },
+  { sym:"Boom 500",  type:"SYNTHETIC",price:9122,   changePct:0.21,  rsi:40.1, signal:"BUY",  strength:"MODERATE",bias:"BULLISH", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:18.50  },
+  { sym:"Crash 1000",type:"SYNTHETIC",price:9352,   changePct:-0.18, rsi:68.2, signal:"SELL", strength:"MODERATE",bias:"BEARISH", macd:"BEAR", ema:"BELOW", volume:"HIGH",   atr:20.00  },
+  { sym:"Crash 500", type:"SYNTHETIC",price:9053,   changePct:-0.31, rsi:72.4, signal:"SELL", strength:"STRONG",  bias:"BEARISH", macd:"BEAR", ema:"BELOW", volume:"HIGH",   atr:17.50  },
+  { sym:"Vol 75",    type:"SYNTHETIC",price:8241,   changePct:0.08,  rsi:50.2, signal:"HOLD", strength:"NEUTRAL", bias:"RANGING", macd:"BULL", ema:"ABOVE", volume:"NORMAL", atr:45.00  },
+];
+
+const TYPE_COLOR = {
+  FOREX:"#00aaff", SYNTHETIC:"#9944ff",
+  COMMODITY:"#ffaa00", ETF:"#00ff88", CRYPTO:"#ff9944",
+};
+
+const SIG_COLOR = {
+  BUY:"#00ff88", SELL:"#ff4466", HOLD:"#ffcc00",
+};
+
+const STRENGTH_COLOR = {
+  STRONG:"#00ff88", MODERATE:"#ffcc00", NEUTRAL:"#334466", WEAK:"#ff9944",
+};
+
+// ── FILTER CONFIG ─────────────────────────────────────────────
+const SIGNAL_OPTS   = ["ALL","BUY","SELL","HOLD"];
+const TYPE_OPTS     = ["ALL","FOREX","SYNTHETIC","CRYPTO","COMMODITY","ETF"];
+const STRENGTH_OPTS = ["ALL","STRONG","MODERATE","NEUTRAL"];
+const BIAS_OPTS     = ["ALL","BULLISH","BEARISH","RANGING"];
+const MACD_OPTS     = ["ALL","BULL","BEAR"];
+const EMA_OPTS      = ["ALL","ABOVE","BELOW"];
+const VOLUME_OPTS   = ["ALL","HIGH","NORMAL","LOW"];
+
+export default function Screener({ instruments }) {
+  const data = instruments || SAMPLE_DATA;
+
+  // ── Filter state ──────────────────────────────────────────
+  const [signal,   setSignal]   = useState("ALL");
+  const [type,     setType]     = useState("ALL");
+  const [strength, setStrength] = useState("ALL");
+  const [bias,     setBias]     = useState("ALL");
+  const [macd,     setMacd]     = useState("ALL");
+  const [ema,      setEma]      = useState("ALL");
+  const [volume,   setVolume]   = useState("ALL");
+  const [rsiMin,   setRsiMin]   = useState(0);
+  const [rsiMax,   setRsiMax]   = useState(100);
+  const [sortBy,   setSortBy]   = useState("rsi");
+  const [sortDir,  setSortDir]  = useState("asc");
+  const [search,   setSearch]   = useState("");
+  const [showFilters, setShowF] = useState(true);
+
+  // ── Apply filters ─────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let r = [...data];
+    if (signal   !== "ALL") r = r.filter(d=>d.signal===signal);
+    if (type     !== "ALL") r = r.filter(d=>d.type===type);
+    if (strength !== "ALL") r = r.filter(d=>d.strength===strength);
+    if (bias     !== "ALL") r = r.filter(d=>d.bias===bias);
+    if (macd     !== "ALL") r = r.filter(d=>d.macd===macd);
+    if (ema      !== "ALL") r = r.filter(d=>d.ema===ema);
+    if (volume   !== "ALL") r = r.filter(d=>d.volume===volume);
+    r = r.filter(d=>d.rsi>=rsiMin && d.rsi<=rsiMax);
+    if (search) r = r.filter(d=>d.sym.toLowerCase().includes(search.toLowerCase()));
+    r.sort((a,b)=>{
+      const av=a[sortBy]||0, bv=b[sortBy]||0;
+      if (typeof av==="string") return sortDir==="asc"?av.localeCompare(bv):bv.localeCompare(av);
+      return sortDir==="asc" ? av-bv : bv-av;
+    });
+    return r;
+  }, [data,signal,type,strength,bias,macd,ema,volume,rsiMin,rsiMax,search,sortBy,sortDir]);
+
+  function resetFilters() {
+    setSignal("ALL"); setType("ALL"); setStrength("ALL");
+    setBias("ALL"); setMacd("ALL"); setEma("ALL"); setVolume("ALL");
+    setRsiMin(0); setRsiMax(100); setSearch("");
+  }
+
+  function toggleSort(col) {
+    if (sortBy===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortBy(col); setSortDir("asc"); }
+  }
+
+  function SortIcon({col}) {
+    if (sortBy!==col) return <span style={{color:"#1e3050"}}>↕</span>;
+    return <span style={{color:"#9944ff"}}>{sortDir==="asc"?"↑":"↓"}</span>;
+  }
+
+  // Quick filter presets
+  const PRESETS = [
+    {label:"🔥 Strong Signals", fn:()=>{setStrength("STRONG");setSignal("ALL")}},
+    {label:"🟢 All BUY",        fn:()=>{setSignal("BUY");setStrength("ALL")}},
+    {label:"🔴 All SELL",       fn:()=>{setSignal("SELL");setStrength("ALL")}},
+    {label:"📊 RSI Oversold",   fn:()=>{setRsiMin(0);setRsiMax(30)}},
+    {label:"📊 RSI Overbought", fn:()=>{setRsiMin(70);setRsiMax(100)}},
+    {label:"⚡ Synthetics",     fn:()=>{setType("SYNTHETIC")}},
+    {label:"₿ Crypto",          fn:()=>{setType("CRYPTO")}},
+    {label:"💱 Forex",          fn:()=>{setType("FOREX")}},
+  ];
+
+  function FilterRow({label, value, setter, options}) {
+    return (
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",
+          letterSpacing:1,marginBottom:5}}>{label}</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {options.map(opt=>{
+            const active = value===opt;
+            return(
+              <button key={opt} onClick={()=>setter(opt)} style={{
+                background:active?"#9944ff22":"#060d18",
+                border:`1px solid ${active?"#9944ff88":"#0d1e32"}`,
+                borderRadius:20,color:active?"#cc77ff":"#334466",
+                fontSize:10,padding:"3px 10px",cursor:"pointer",
+                fontFamily:"monospace",transition:"all 0.15s",
+              }}>{opt}</button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input{outline:none;transition:border-color 0.2s}
+    input:focus{border-color:#6622cc !important}
+    input::placeholder{color:#233344}
+    input[type=range]{accent-color:#9944ff}
+    @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.2s ease}
+    ::-webkit-scrollbar{height:3px;width:3px}
+    ::-webkit-scrollbar-track{background:#060d18}
+    ::-webkit-scrollbar-thumb{background:#2a1a4a}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",maxWidth:520,margin:"0 auto",padding:"16px"}}>
+
+        {/* Header */}
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,
+          color:"#9944ff",letterSpacing:2,marginBottom:4}}>ORACLE TRADER</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:22,fontWeight:900,color:"#ddeeff"}}>🔍 Screener</div>
+            <div style={{fontSize:11,color:"#334466",fontFamily:"monospace"}}>
+              {filtered.length} of {data.length} instruments match
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={resetFilters} style={{
+              background:"none",border:"1px solid #0d1e32",borderRadius:8,
+              color:"#334466",padding:"7px 12px",fontSize:11,cursor:"pointer",
+              fontFamily:"monospace",
+            }}>Reset</button>
+            <button onClick={()=>setShowF(s=>!s)} style={{
+              background:showFilters?"#9944ff22":"#080f1e",
+              border:`1px solid ${showFilters?"#9944ff":"#0d1e32"}`,
+              borderRadius:8,color:showFilters?"#cc77ff":"#334466",
+              padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:"monospace",
+            }}>{showFilters?"Hide":"Filters"}</button>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div style={{position:"relative",marginBottom:12}}>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Search instrument..."
+            style={{width:"100%",background:"#080f1e",border:"1px solid #0d1e32",
+              borderRadius:8,color:"#aabbd0",padding:"10px 14px 10px 34px",
+              fontSize:13,fontFamily:"'Rajdhani',sans-serif"}}/>
+          <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",
+            color:"#334466",fontSize:14}}>🔍</span>
+        </div>
+
+        {/* Quick presets */}
+        <div style={{display:"flex",gap:6,marginBottom:12,
+          overflowX:"auto",scrollbarWidth:"none"}}>
+          {PRESETS.map((p,i)=>(
+            <button key={i} onClick={p.fn} style={{
+              background:"#080f1e",border:"1px solid #0d1e32",
+              borderRadius:20,color:"#334466",fontSize:10,
+              padding:"5px 12px",cursor:"pointer",
+              fontFamily:"monospace",flexShrink:0,whiteSpace:"nowrap",
+              transition:"border-color 0.2s",
+            }}
+            onMouseEnter={e=>e.target.style.borderColor="#9944ff44"}
+            onMouseLeave={e=>e.target.style.borderColor="#0d1e32"}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Filters panel */}
+        {showFilters && (
+          <div className="fadein" style={{background:"#080f1e",border:"1px solid #0d1e32",
+            borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",
+              letterSpacing:1,marginBottom:12}}>FILTER CONDITIONS</div>
+
+            <FilterRow label="SIGNAL"   value={signal}   setter={setSignal}   options={SIGNAL_OPTS}/>
+            <FilterRow label="TYPE"     value={type}     setter={setType}     options={TYPE_OPTS}/>
+            <FilterRow label="STRENGTH" value={strength} setter={setStrength} options={STRENGTH_OPTS}/>
+            <FilterRow label="BIAS"     value={bias}     setter={setBias}     options={BIAS_OPTS}/>
+            <FilterRow label="MACD"     value={macd}     setter={setMacd}     options={MACD_OPTS}/>
+            <FilterRow label="EMA 9/21" value={ema}      setter={setEma}      options={EMA_OPTS}/>
+            <FilterRow label="VOLUME"   value={volume}   setter={setVolume}   options={VOLUME_OPTS}/>
+
+            {/* RSI Range */}
+            <div style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",
+                fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:5}}>
+                <span>RSI RANGE</span>
+                <span style={{color:"#9944ff"}}>{rsiMin} – {rsiMax}</span>
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                <input type="range" min="0" max="100" value={rsiMin}
+                  onChange={e=>setRsiMin(Math.min(parseInt(e.target.value),rsiMax-5))}
+                  style={{flex:1}}/>
+                <input type="range" min="0" max="100" value={rsiMax}
+                  onChange={e=>setRsiMax(Math.max(parseInt(e.target.value),rsiMin+5))}
+                  style={{flex:1}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",
+                fontSize:9,color:"#1e3050",fontFamily:"monospace",marginTop:3}}>
+                <span>0 Oversold</span><span>50 Neutral</span><span>100 Overbought</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sort bar */}
+        <div style={{display:"flex",gap:4,marginBottom:8,overflowX:"auto",scrollbarWidth:"none"}}>
+          <span style={{fontSize:9,color:"#334466",fontFamily:"monospace",
+            alignSelf:"center",flexShrink:0,marginRight:4}}>SORT:</span>
+          {[
+            {col:"sym",    label:"Name"},
+            {col:"rsi",    label:"RSI"},
+            {col:"changePct",label:"Change"},
+            {col:"signal", label:"Signal"},
+            {col:"type",   label:"Type"},
+          ].map(s=>(
+            <button key={s.col} onClick={()=>toggleSort(s.col)} style={{
+              background:sortBy===s.col?"#9944ff22":"#080f1e",
+              border:`1px solid ${sortBy===s.col?"#9944ff88":"#0d1e32"}`,
+              borderRadius:6,color:sortBy===s.col?"#cc77ff":"#334466",
+              fontSize:10,padding:"4px 10px",cursor:"pointer",
+              fontFamily:"monospace",flexShrink:0,
+              display:"flex",alignItems:"center",gap:4,
+            }}>
+              {s.label} <SortIcon col={s.col}/>
+            </button>
+          ))}
+        </div>
+
+        {/* Results */}
+        {filtered.length===0 && (
+          <div style={{textAlign:"center",padding:"40px 20px",
+            color:"#334466",fontFamily:"monospace",fontSize:12}}>
+            <div style={{fontSize:32,marginBottom:12}}>🔍</div>
+            No instruments match your filters.<br/>
+            <button onClick={resetFilters} style={{
+              marginTop:12,background:"none",border:"1px solid #0d1e32",
+              borderRadius:6,color:"#334466",padding:"6px 14px",
+              fontSize:11,cursor:"pointer",fontFamily:"monospace",
+            }}>Reset Filters</button>
+          </div>
+        )}
+
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtered.map(d => {
+            const tc  = TYPE_COLOR[d.type] || "#aabbdd";
+            const sc  = SIG_COLOR[d.signal] || "#ffcc00";
+            const up  = d.changePct >= 0;
+            const rsiC = d.rsi<=30?"#00ff88":d.rsi>=70?"#ff4466":"#cc77ff";
+            return (
+              <div key={d.sym} className="fadein" style={{
+                background:"#080f1e",
+                border:`1px solid ${d.signal==="HOLD"?"#0d1e32":sc+"33"}`,
+                borderLeft:`3px solid ${tc}`,
+                borderRadius:8,padding:"12px 14px",
+              }}>
+                {/* Top row */}
+                <div style={{display:"flex",justifyContent:"space-between",
+                  alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:14,fontWeight:700,color:"#ddeeff"}}>{d.sym}</span>
+                      <span style={{fontSize:9,color:tc,fontFamily:"monospace",
+                        background:tc+"18",border:`1px solid ${tc}33`,
+                        borderRadius:4,padding:"1px 6px"}}>{d.type}</span>
+                    </div>
+                    <div style={{fontSize:11,color:"#334466",fontFamily:"monospace",marginTop:2}}>
+                      Bias: <span style={{
+                        color:d.bias==="BULLISH"?"#00ff88":d.bias==="BEARISH"?"#ff4466":"#ffcc00"
+                      }}>{d.bias}</span>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#ddeeff",
+                      fontFamily:"'Share Tech Mono',monospace"}}>{d.price}</div>
+                    <div style={{fontSize:10,color:up?"#00ff88":"#ff4466",fontFamily:"monospace"}}>
+                      {up?"▲ +":"▼ "}{d.changePct}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Indicators row */}
+                <div style={{display:"flex",gap:8,alignItems:"center",
+                  flexWrap:"wrap",marginBottom:8}}>
+                  {/* RSI bar */}
+                  <div style={{flex:1,minWidth:100}}>
+                    <div style={{fontSize:8,color:"#334466",fontFamily:"monospace",marginBottom:3}}>
+                      RSI {d.rsi}
+                    </div>
+                    <div style={{height:3,background:"#0d1e32",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{width:`${d.rsi}%`,height:"100%",
+                        background:rsiC,borderRadius:2,transition:"width 0.5s"}}/>
+                    </div>
+                  </div>
+
+                  {/* MACD badge */}
+                  <div style={{
+                    fontSize:9,fontFamily:"monospace",padding:"2px 8px",borderRadius:4,
+                    background:d.macd==="BULL"?"#00ff8815":"#ff446615",
+                    border:`1px solid ${d.macd==="BULL"?"#00ff8833":"#ff446633"}`,
+                    color:d.macd==="BULL"?"#00ff88":"#ff4466",
+                  }}>MACD {d.macd==="BULL"?"↑":"↓"}</div>
+
+                  {/* EMA badge */}
+                  <div style={{
+                    fontSize:9,fontFamily:"monospace",padding:"2px 8px",borderRadius:4,
+                    background:d.ema==="ABOVE"?"#00aaff15":"#ff446615",
+                    border:`1px solid ${d.ema==="ABOVE"?"#00aaff33":"#ff446633"}`,
+                    color:d.ema==="ABOVE"?"#00aaff":"#ff4466",
+                  }}>EMA {d.ema}</div>
+
+                  {/* Volume badge */}
+                  <div style={{
+                    fontSize:9,fontFamily:"monospace",padding:"2px 8px",borderRadius:4,
+                    background:d.volume==="HIGH"?"#ffcc0015":"#0d1e32",
+                    border:`1px solid ${d.volume==="HIGH"?"#ffcc0033":"#1e3050"}`,
+                    color:d.volume==="HIGH"?"#ffcc00":"#334466",
+                  }}>VOL {d.volume}</div>
+                </div>
+
+                {/* Signal badge */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{
+                    background:sc+"18",border:`1px solid ${sc}44`,
+                    borderRadius:6,padding:"5px 14px",
+                    fontSize:12,color:sc,fontFamily:"monospace",fontWeight:"bold",
+                    display:"flex",alignItems:"center",gap:6,
+                  }}>
+                    {d.signal==="BUY"?"▲":d.signal==="SELL"?"▼":"—"} {d.signal}
+                    <span style={{fontSize:10,color:STRENGTH_COLOR[d.strength]}}>
+                      {d.strength}
+                    </span>
+                  </div>
+                  <div style={{fontSize:10,color:"#334466",fontFamily:"monospace"}}>
+                    ATR {d.atr}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Summary stats */}
+        {filtered.length > 0 && (
+          <div style={{background:"#080f1e",border:"1px solid #0d1e32",
+            borderRadius:10,padding:14,marginTop:14}}>
+            <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",
+              letterSpacing:1,marginBottom:10}}>SCREENER SUMMARY</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {[
+                {label:"BUY",  val:filtered.filter(d=>d.signal==="BUY").length,  color:"#00ff88"},
+                {label:"SELL", val:filtered.filter(d=>d.signal==="SELL").length, color:"#ff4466"},
+                {label:"HOLD", val:filtered.filter(d=>d.signal==="HOLD").length, color:"#ffcc00"},
+                {label:"Strong",val:filtered.filter(d=>d.strength==="STRONG").length,color:"#cc77ff"},
+                {label:"Bullish",val:filtered.filter(d=>d.bias==="BULLISH").length,color:"#00ff88"},
+                {label:"Bearish",val:filtered.filter(d=>d.bias==="BEARISH").length,color:"#ff4466"},
+              ].map(s=>(
+                <div key={s.label} style={{background:"#060d18",border:"1px solid #0d1e32",
+                  borderRadius:6,padding:"8px",textAlign:"center"}}>
+                  <div style={{fontSize:18,fontWeight:900,color:s.color,fontFamily:"monospace"}}>{s.val}</div>
+                  <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",marginTop:2}}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",
+          textAlign:"center",marginTop:16}}>
+          🔮 ORACLE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

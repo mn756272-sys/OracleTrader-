@@ -1,0 +1,243 @@
+import { useState } from "react";
+
+const SAMPLE = [
+  { id:1, sym:"EUR/USD", side:"BUY", entry:1.0820, sl:1.0800, tp:1.0860, exit:1.0858, outcome:"WIN", rr:1.9, date:"2025-05-18", note:"Golden cross + RSI oversold" },
+  { id:2, sym:"Boom 1000", side:"BUY", entry:9420, sl:9390, tp:9480, exit:9385, outcome:"LOSS", rr:-1, date:"2025-05-17", note:"Spike faded too fast" },
+  { id:3, sym:"XAU/USD", side:"SELL", entry:2345, sl:2355, tp:2325, exit:2326, outcome:"WIN", rr:1.9, date:"2025-05-16", note:"Overbought RSI 72" },
+  { id:4, sym:"GBP/USD", side:"BUY", entry:1.2710, sl:1.2690, tp:1.2750, exit:1.2750, outcome:"WIN", rr:2.0, date:"2025-05-15", note:"MACD bullish crossover" },
+  { id:5, sym:"Crash 500", side:"SELL", entry:9060, sl:9080, tp:9020, exit:9022, outcome:"WIN", rr:1.9, date:"2025-05-14", note:"RSI overbought 71" },
+];
+
+export default function TradeJournal() {
+  const [trades, setTrades] = useState(SAMPLE);
+  const [showAdd, setShowAdd] = useState(false);
+  const [filter, setFilter] = useState("ALL");
+  const [form, setForm] = useState({
+    sym:"EUR/USD", side:"BUY", entry:"", sl:"", tp:"", exit:"", outcome:"WIN", note:"", date: new Date().toISOString().split("T")[0]
+  });
+
+  const filtered = filter==="ALL" ? trades : trades.filter(t=>t.outcome===filter);
+  const wins = trades.filter(t=>t.outcome==="WIN").length;
+  const losses = trades.filter(t=>t.outcome==="LOSS").length;
+  const winRate = trades.length>0 ? Math.round((wins/trades.length)*100) : 0;
+  const totalR = trades.reduce((a,t)=>a+(t.rr||0),0).toFixed(1);
+  const avgR = trades.length>0 ? (parseFloat(totalR)/trades.length).toFixed(2) : 0;
+
+  function addTrade() {
+    if (!form.entry||!form.sl||!form.tp) return;
+    const entry=parseFloat(form.entry), sl=parseFloat(form.sl),
+          tp=parseFloat(form.tp), exit=parseFloat(form.exit)||tp;
+    const pipRisk=Math.abs(entry-sl), pipTarget=Math.abs(tp-entry);
+    const rr = form.outcome==="WIN"
+      ? parseFloat((pipTarget/pipRisk).toFixed(2))
+      : -1;
+    setTrades(p=>[{ id:Date.now(), ...form, entry, sl, tp, exit, rr },...p]);
+    setShowAdd(false);
+    setForm({sym:"EUR/USD",side:"BUY",entry:"",sl:"",tp:"",exit:"",outcome:"WIN",note:"",date:new Date().toISOString().split("T")[0]});
+  }
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input,select,textarea{outline:none;transition:border-color 0.2s}
+    input:focus,select:focus,textarea:focus{border-color:#0055bb !important}
+    input::placeholder,textarea::placeholder{color:#233344}
+    select option{background:#080f1e}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  const inputStyle = {
+    width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+    borderRadius:8, color:"#aabbd0", padding:"10px 12px",
+    fontSize:13, fontFamily:"monospace",
+  };
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        {/* Header */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <div>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12, color:"#00aaff", letterSpacing:2 }}>SMONKIE TRADER</div>
+            <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff" }}>📓 Trade Journal</div>
+          </div>
+          <button onClick={()=>setShowAdd(s=>!s)} style={{
+            background:"linear-gradient(135deg,#0044aa,#0066cc)", border:"none",
+            borderRadius:8, color:"#fff", padding:"10px 16px", fontSize:13,
+            cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+          }}>+ Add Trade</button>
+        </div>
+
+        {/* Stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, marginBottom:16 }}>
+          {[
+            { label:"Trades", val:trades.length, color:"#aabbdd" },
+            { label:"Win Rate", val:`${winRate}%`, color: winRate>=60?"#00ff88":winRate>=50?"#ffcc00":"#ff4466" },
+            { label:"Total R", val:`${parseFloat(totalR)>=0?"+":""}${totalR}R`, color:parseFloat(totalR)>=0?"#00ff88":"#ff4466" },
+            { label:"Avg R", val:`${avgR}R`, color:parseFloat(avgR)>=1?"#00ff88":"#ffcc00" },
+          ].map(s=>(
+            <div key={s.label} style={{ background:"#080f1e", border:"1px solid #0d1e32",
+              borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+              <div style={{ fontSize:16, fontWeight:900, color:s.color, fontFamily:"monospace" }}>{s.val}</div>
+              <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Win/Loss bar */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:8, padding:"12px 14px", marginBottom:16 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, fontFamily:"monospace", marginBottom:6 }}>
+            <span style={{ color:"#00ff88" }}>W {wins}</span>
+            <span style={{ color:"#334466" }}>{winRate}% win rate</span>
+            <span style={{ color:"#ff4466" }}>L {losses}</span>
+          </div>
+          <div style={{ height:6, background:"#0d1e32", borderRadius:3, overflow:"hidden" }}>
+            <div style={{ width:`${winRate}%`, height:"100%",
+              background:"linear-gradient(90deg,#00ff88,#44cc88)", borderRadius:3, transition:"width 0.5s" }}/>
+          </div>
+        </div>
+
+        {/* Add trade form */}
+        {showAdd && (
+          <div className="fadein" style={{ background:"#080f1e", border:"1px solid #0044aa44",
+            borderRadius:10, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"#ddeeff", marginBottom:14 }}>New Trade</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>SYMBOL</div>
+                <input value={form.sym} onChange={e=>setForm(p=>({...p,sym:e.target.value}))}
+                  placeholder="EUR/USD" style={inputStyle}/>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>DATE</div>
+                <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))}
+                  style={inputStyle}/>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>ENTRY</div>
+                <input type="number" value={form.entry} onChange={e=>setForm(p=>({...p,entry:e.target.value}))}
+                  placeholder="1.0820" style={inputStyle}/>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>STOP LOSS</div>
+                <input type="number" value={form.sl} onChange={e=>setForm(p=>({...p,sl:e.target.value}))}
+                  placeholder="1.0800" style={inputStyle}/>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>TAKE PROFIT</div>
+                <input type="number" value={form.tp} onChange={e=>setForm(p=>({...p,tp:e.target.value}))}
+                  placeholder="1.0860" style={inputStyle}/>
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>EXIT PRICE</div>
+                <input type="number" value={form.exit} onChange={e=>setForm(p=>({...p,exit:e.target.value}))}
+                  placeholder="1.0858" style={inputStyle}/>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+              {["BUY","SELL"].map(s=>(
+                <button key={s} onClick={()=>setForm(p=>({...p,side:s}))} style={{
+                  flex:1, padding:"8px", border:`1px solid ${form.side===s?(s==="BUY"?"#00ff88":"#ff4466"):"#0d1e32"}`,
+                  borderRadius:6, background: form.side===s?(s==="BUY"?"#00ff8815":"#ff446615"):"#060d18",
+                  color: form.side===s?(s==="BUY"?"#00ff88":"#ff4466"):"#334466",
+                  fontSize:12, cursor:"pointer", fontFamily:"monospace", fontWeight:"bold",
+                }}>{s==="BUY"?"▲ BUY":"▼ SELL"}</button>
+              ))}
+              {["WIN","LOSS"].map(o=>(
+                <button key={o} onClick={()=>setForm(p=>({...p,outcome:o}))} style={{
+                  flex:1, padding:"8px", border:`1px solid ${form.outcome===o?(o==="WIN"?"#00ff88":"#ff4466"):"#0d1e32"}`,
+                  borderRadius:6, background: form.outcome===o?(o==="WIN"?"#00ff8815":"#ff446615"):"#060d18",
+                  color: form.outcome===o?(o==="WIN"?"#00ff88":"#ff4466"):"#334466",
+                  fontSize:12, cursor:"pointer", fontFamily:"monospace", fontWeight:"bold",
+                }}>{o==="WIN"?"✓ WIN":"✗ LOSS"}</button>
+              ))}
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>NOTES</div>
+              <textarea value={form.note} onChange={e=>setForm(p=>({...p,note:e.target.value}))}
+                placeholder="Why did you take this trade? What did you learn?"
+                rows={2} style={{ ...inputStyle, resize:"none", lineHeight:1.5 }}/>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setShowAdd(false)} style={{
+                flex:1, background:"none", border:"1px solid #0d1e32", borderRadius:8,
+                color:"#334466", padding:"10px", fontSize:13, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:600,
+              }}>Cancel</button>
+              <button onClick={addTrade} style={{
+                flex:2, background:"linear-gradient(135deg,#0044aa,#0066cc)", border:"none",
+                borderRadius:8, color:"#fff", padding:"10px", fontSize:14, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+              }}>Save Trade</button>
+            </div>
+          </div>
+        )}
+
+        {/* Filter */}
+        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+          {["ALL","WIN","LOSS"].map(f=>(
+            <button key={f} onClick={()=>setFilter(f)} style={{
+              background: filter===f?"#0044aa22":"#080f1e",
+              border:`1px solid ${filter===f?"#0044aa":"#0d1e32"}`,
+              borderRadius:20, color: filter===f?"#00aaff":"#334466",
+              fontSize:11, padding:"5px 14px", cursor:"pointer", fontFamily:"monospace",
+            }}>{f}</button>
+          ))}
+          <span style={{ marginLeft:"auto", fontSize:10, color:"#334466",
+            fontFamily:"monospace", alignSelf:"center" }}>{filtered.length} trades</span>
+        </div>
+
+        {/* Trade list */}
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {filtered.map(t => (
+            <div key={t.id} className="fadein" style={{
+              background:"#080f1e",
+              border:`1px solid ${t.outcome==="WIN"?"#00ff8822":"#ff446622"}`,
+              borderLeft:`3px solid ${t.outcome==="WIN"?"#00ff88":"#ff4466"}`,
+              borderRadius:8, padding:"12px 14px",
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ fontWeight:700, fontSize:14, color:"#ddeeff" }}>{t.sym}</span>
+                  <span style={{ fontSize:10, fontFamily:"monospace", padding:"2px 8px",
+                    borderRadius:4, background:t.side==="BUY"?"#00ff8815":"#ff446615",
+                    color:t.side==="BUY"?"#00ff88":"#ff4466",
+                    border:`1px solid ${t.side==="BUY"?"#00ff8833":"#ff446633"}` }}>
+                    {t.side==="BUY"?"▲":"▼"} {t.side}
+                  </span>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:13, fontWeight:700, fontFamily:"monospace",
+                    color:t.outcome==="WIN"?"#00ff88":"#ff4466" }}>
+                    {t.outcome==="WIN"?"+":""}{t.rr}R
+                  </div>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{t.date}</div>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:16, fontSize:11, color:"#667799", fontFamily:"monospace" }}>
+                <span>Entry <span style={{ color:"#aabbdd" }}>{t.entry}</span></span>
+                <span>SL <span style={{ color:"#ff4466" }}>{t.sl}</span></span>
+                <span>TP <span style={{ color:"#00ff88" }}>{t.tp}</span></span>
+                <span>Exit <span style={{ color:"#aabbdd" }}>{t.exit}</span></span>
+              </div>
+              {t.note && (
+                <div style={{ fontSize:11, color:"#334466", marginTop:6,
+                  fontFamily:"monospace", fontStyle:"italic" }}>"{t.note}"</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+          textAlign:"center", marginTop:20 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

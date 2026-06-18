@@ -1,0 +1,349 @@
+import { useState } from "react";
+
+const INSTRUMENTS = [
+  { sym:"EUR/USD", type:"FOREX", icon:"💱" },
+  { sym:"GBP/USD", type:"FOREX", icon:"💱" },
+  { sym:"USD/ZAR", type:"FOREX", icon:"💱" },
+  { sym:"XAU/USD", type:"COMMODITY", icon:"🥇" },
+  { sym:"Boom 1000", type:"SYNTHETIC", icon:"⚡" },
+  { sym:"Crash 1000", type:"SYNTHETIC", icon:"⚡" },
+  { sym:"BTC/USD", type:"CRYPTO", icon:"₿" },
+  { sym:"SPY", type:"ETF", icon:"📈" },
+];
+
+const TYPE_COLOR = {
+  FOREX:"#00aaff", SYNTHETIC:"#bb44ff",
+  COMMODITY:"#ffaa00", CRYPTO:"#ff9944", ETF:"#00ff88",
+};
+
+export default function Onboarding({ onComplete }) {
+  const [step, setStep] = useState(0);
+  const [agreed, setAgreed] = useState(false);
+  const [balance, setBalance] = useState("");
+  const [risk, setRisk] = useState("1");
+  const [selected, setSelected] = useState(["EUR/USD","Boom 1000","XAU/USD"]);
+  const [name, setName] = useState("");
+
+  const steps = [
+    "Welcome", "Disclaimer", "Account Setup", "Instruments", "Ready"
+  ];
+
+  function toggleInst(sym) {
+    setSelected(p => p.includes(sym) ? p.filter(s=>s!==sym) : [...p, sym]);
+  }
+
+  function finish() {
+    onComplete?.({ name, balance: parseFloat(balance)||1000, risk: parseFloat(risk)||1, watchlist: selected });
+  }
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+    @keyframes fadein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.4s ease}
+    input{outline:none}
+    input:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+  `;
+
+  const W = { fontFamily:"'Rajdhani',sans-serif", background:"#060d18", minHeight:"100vh",
+    color:"#c8d8f0", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto",
+    padding:"0 0 40px" };
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={W}>
+
+        {/* Progress bar */}
+        <div style={{ padding:"20px 24px 0" }}>
+          <div style={{ display:"flex", gap:6, marginBottom:20 }}>
+            {steps.map((s,i) => (
+              <div key={i} style={{
+                flex:1, height:3, borderRadius:2,
+                background: i <= step ? "#00aaff" : "#0d1e32",
+                transition:"background 0.4s",
+              }}/>
+            ))}
+          </div>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", letterSpacing:1 }}>
+            STEP {step+1} OF {steps.length} — {steps[step].toUpperCase()}
+          </div>
+        </div>
+
+        {/* Step 0 — Welcome */}
+        {step===0 && (
+          <div className="fadein" style={{ flex:1, display:"flex", flexDirection:"column",
+            alignItems:"center", justifyContent:"center", padding:"40px 24px", textAlign:"center" }}>
+            <div style={{ fontSize:80, marginBottom:16,
+              filter:"drop-shadow(0 0 30px #0066ff)" }}>🐒</div>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:28,
+              color:"#00aaff", letterSpacing:4, marginBottom:8 }}>SMONKIE</div>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:14,
+              color:"#334466", letterSpacing:6, marginBottom:28 }}>TRADER</div>
+            <div style={{ fontSize:16, color:"#667799", lineHeight:1.7, marginBottom:12 }}>
+              AI-powered trading signals for
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center", marginBottom:36 }}>
+              {["Forex","Boom & Crash","Gold","Crypto","ETFs"].map(t => (
+                <span key={t} style={{ background:"#0a1628", border:"1px solid #0d1e32",
+                  borderRadius:20, padding:"4px 12px", fontSize:12,
+                  color:"#4488bb", fontFamily:"monospace" }}>{t}</span>
+              ))}
+            </div>
+            <div style={{ marginBottom:24 }}>
+              <div style={{ fontSize:14, color:"#667799", marginBottom:12 }}>Your name (optional)</div>
+              <input value={name} onChange={e=>setName(e.target.value)}
+                placeholder="Enter your name..."
+                style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:8,
+                  color:"#aabbd0", padding:"12px 16px", fontSize:14,
+                  fontFamily:"'Rajdhani',sans-serif", width:"100%", maxWidth:280 }}/>
+            </div>
+            <button onClick={()=>setStep(1)} style={{
+              background:"linear-gradient(135deg,#0044aa,#0066cc)",
+              border:"none", borderRadius:10, color:"#fff",
+              padding:"14px 40px", fontSize:16, cursor:"pointer",
+              fontFamily:"'Rajdhani',sans-serif", fontWeight:700, letterSpacing:1,
+            }}>Get Started →</button>
+          </div>
+        )}
+
+        {/* Step 1 — Disclaimer */}
+        {step===1 && (
+          <div className="fadein" style={{ flex:1, padding:"32px 24px" }}>
+            <div style={{ fontSize:24, fontWeight:900, color:"#ddeeff", marginBottom:8 }}>
+              ⚠ Important Disclaimer
+            </div>
+            <div style={{ fontSize:13, color:"#334466", fontFamily:"monospace", marginBottom:24 }}>
+              Please read carefully before continuing
+            </div>
+            <div style={{ background:"#080f1e", border:"1px solid #ff446633",
+              borderRadius:10, padding:20, marginBottom:24 }}>
+              {[
+                "SMONKIE TRADER provides trading signals and analysis tools for educational and informational purposes only.",
+                "Signals are NOT guaranteed to be profitable. Past performance does not guarantee future results.",
+                "Trading financial instruments including forex, synthetic indices, and cryptocurrencies involves significant risk of loss.",
+                "Never trade with money you cannot afford to lose.",
+                "SMONKIE is NOT a licensed financial advisor. Always do your own research.",
+                "Boom & Crash and Volatility indices are highly volatile synthetic products. They carry extreme risk.",
+                "You are solely responsible for your trading decisions.",
+              ].map((t,i) => (
+                <div key={i} style={{ display:"flex", gap:12, padding:"10px 0",
+                  borderBottom:i<6?"1px solid #0d1e32":"none" }}>
+                  <span style={{ color:"#ff4466", flexShrink:0, marginTop:2 }}>⚠</span>
+                  <span style={{ fontSize:13, color:"#667799", lineHeight:1.6 }}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <div onClick={()=>setAgreed(a=>!a)} style={{
+              display:"flex", alignItems:"center", gap:12, cursor:"pointer",
+              background: agreed?"#00ff8812":"#080f1e",
+              border:`1px solid ${agreed?"#00ff8844":"#0d1e32"}`,
+              borderRadius:8, padding:"14px 16px", marginBottom:24,
+              transition:"all 0.2s",
+            }}>
+              <div style={{
+                width:22, height:22, borderRadius:4, flexShrink:0,
+                background: agreed?"#00ff88":"#060d18",
+                border:`2px solid ${agreed?"#00ff88":"#1e3050"}`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:14, color:"#000", transition:"all 0.2s",
+              }}>{agreed?"✓":""}</div>
+              <div style={{ fontSize:13, color: agreed?"#00ff88":"#667799", lineHeight:1.5 }}>
+                I understand and accept the risks. SMONKIE is not financial advice. I trade at my own risk.
+              </div>
+            </div>
+            <button onClick={()=>agreed&&setStep(2)} style={{
+              background: agreed?"linear-gradient(135deg,#0044aa,#0066cc)":"#0a1628",
+              border:`1px solid ${agreed?"#0044aa":"#0d1e32"}`,
+              borderRadius:10, color: agreed?"#fff":"#334466",
+              padding:"14px", fontSize:15, cursor: agreed?"pointer":"default",
+              fontFamily:"'Rajdhani',sans-serif", fontWeight:700, width:"100%",
+              transition:"all 0.3s",
+            }}>
+              {agreed ? "I Agree — Continue →" : "Please accept to continue"}
+            </button>
+          </div>
+        )}
+
+        {/* Step 2 — Account Setup */}
+        {step===2 && (
+          <div className="fadein" style={{ flex:1, padding:"32px 24px" }}>
+            <div style={{ fontSize:24, fontWeight:900, color:"#ddeeff", marginBottom:8 }}>
+              🎯 Risk Settings
+            </div>
+            <div style={{ fontSize:13, color:"#334466", fontFamily:"monospace", marginBottom:28 }}>
+              Set your account size and risk tolerance
+            </div>
+
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:13, color:"#667799", marginBottom:8, fontFamily:"monospace" }}>
+                ACCOUNT BALANCE (USD)
+              </div>
+              <input value={balance} onChange={e=>setBalance(e.target.value)}
+                type="number" placeholder="e.g. 500"
+                style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:8,
+                  color:"#aabbd0", padding:"14px 16px", fontSize:16,
+                  fontFamily:"monospace", width:"100%" }}/>
+              <div style={{ fontSize:11, color:"#1e3050", fontFamily:"monospace", marginTop:6 }}>
+                This is used only to calculate position sizes. Never stored externally.
+              </div>
+            </div>
+
+            <div style={{ marginBottom:28 }}>
+              <div style={{ fontSize:13, color:"#667799", marginBottom:8, fontFamily:"monospace" }}>
+                RISK PER TRADE: <span style={{ color:"#00aaff" }}>{risk}%</span>
+              </div>
+              <input type="range" min="0.5" max="5" step="0.5" value={risk}
+                onChange={e=>setRisk(e.target.value)}
+                style={{ width:"100%", accentColor:"#00aaff" }}/>
+              <div style={{ display:"flex", justifyContent:"space-between",
+                fontSize:10, color:"#334466", fontFamily:"monospace", marginTop:4 }}>
+                <span>0.5% (Safe)</span>
+                <span>2% (Standard)</span>
+                <span>5% (Aggressive)</span>
+              </div>
+            </div>
+
+            {balance && (
+              <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+                borderRadius:8, padding:16, marginBottom:24 }}>
+                <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:10 }}>
+                  RISK PREVIEW
+                </div>
+                {[
+                  { label:"Account Balance", val:`$${parseFloat(balance).toLocaleString()}` },
+                  { label:"Risk Per Trade", val:`${risk}%` },
+                  { label:"Max Loss Per Trade", val:`$${(parseFloat(balance)*parseFloat(risk)/100).toFixed(2)}` },
+                  { label:"Recommended Daily Loss Limit", val:`$${(parseFloat(balance)*parseFloat(risk)/100*3).toFixed(2)}` },
+                ].map(({label,val})=>(
+                  <div key={label} style={{ display:"flex", justifyContent:"space-between",
+                    padding:"6px 0", borderBottom:"1px solid #060d18" }}>
+                    <span style={{ fontSize:12, color:"#667799" }}>{label}</span>
+                    <span style={{ fontSize:12, color:"#00aaff", fontFamily:"monospace" }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setStep(1)} style={{
+                background:"none", border:"1px solid #0d1e32", borderRadius:10,
+                color:"#334466", padding:"14px", fontSize:14, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:600, flex:1,
+              }}>← Back</button>
+              <button onClick={()=>setStep(3)} style={{
+                background:"linear-gradient(135deg,#0044aa,#0066cc)",
+                border:"none", borderRadius:10, color:"#fff",
+                padding:"14px", fontSize:15, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:700, flex:2,
+              }}>Continue →</button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3 — Instruments */}
+        {step===3 && (
+          <div className="fadein" style={{ flex:1, padding:"32px 24px" }}>
+            <div style={{ fontSize:24, fontWeight:900, color:"#ddeeff", marginBottom:8 }}>
+              📋 Choose Instruments
+            </div>
+            <div style={{ fontSize:13, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>
+              Select what you want to trade
+            </div>
+            <div style={{ fontSize:11, color:"#1e3050", fontFamily:"monospace", marginBottom:24 }}>
+              {selected.length} selected · You can change this anytime
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+              {INSTRUMENTS.map(inst => {
+                const active = selected.includes(inst.sym);
+                const color = TYPE_COLOR[inst.type];
+                return (
+                  <div key={inst.sym} onClick={()=>toggleInst(inst.sym)} style={{
+                    display:"flex", alignItems:"center", gap:14, cursor:"pointer",
+                    background: active ? color+"12" : "#080f1e",
+                    border:`1px solid ${active ? color+"55" : "#0d1e32"}`,
+                    borderRadius:8, padding:"12px 14px", transition:"all 0.2s",
+                  }}>
+                    <div style={{ fontSize:20 }}>{inst.icon}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color: active?"#ddeeff":"#667799" }}>
+                        {inst.sym}
+                      </div>
+                      <div style={{ fontSize:10, color: active?color:"#334466", fontFamily:"monospace" }}>
+                        {inst.type}
+                      </div>
+                    </div>
+                    <div style={{
+                      width:22, height:22, borderRadius:"50%", flexShrink:0,
+                      background: active ? color : "#060d18",
+                      border:`2px solid ${active ? color : "#1e3050"}`,
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontSize:12, color:"#000", transition:"all 0.2s",
+                    }}>{active?"✓":""}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setStep(2)} style={{
+                background:"none", border:"1px solid #0d1e32", borderRadius:10,
+                color:"#334466", padding:"14px", fontSize:14, cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:600, flex:1,
+              }}>← Back</button>
+              <button onClick={()=>selected.length>0&&setStep(4)} style={{
+                background: selected.length>0?"linear-gradient(135deg,#0044aa,#0066cc)":"#0a1628",
+                border:"none", borderRadius:10, color: selected.length>0?"#fff":"#334466",
+                padding:"14px", fontSize:15, cursor: selected.length>0?"pointer":"default",
+                fontFamily:"'Rajdhani',sans-serif", fontWeight:700, flex:2,
+                transition:"all 0.3s",
+              }}>Continue →</button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4 — Ready */}
+        {step===4 && (
+          <div className="fadein" style={{ flex:1, display:"flex", flexDirection:"column",
+            alignItems:"center", justifyContent:"center", padding:"40px 24px", textAlign:"center" }}>
+            <div style={{ fontSize:70, marginBottom:20,
+              filter:"drop-shadow(0 0 30px #00ff88)" }}>✅</div>
+            <div style={{ fontSize:28, fontWeight:900, color:"#00ff88", marginBottom:8 }}>
+              You are ready{name ? `, ${name}` : ""}!
+            </div>
+            <div style={{ fontSize:15, color:"#667799", lineHeight:1.7, marginBottom:32 }}>
+              SMONKIE is set up and ready to go.
+              Your settings have been saved.
+            </div>
+            <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+              borderRadius:10, padding:20, marginBottom:32, width:"100%", textAlign:"left" }}>
+              {[
+                { label:"Balance", val:`$${parseFloat(balance)||1000}` },
+                { label:"Risk", val:`${risk}% per trade` },
+                { label:"Instruments", val:`${selected.length} selected` },
+              ].map(({label,val})=>(
+                <div key={label} style={{ display:"flex", justifyContent:"space-between",
+                  padding:"8px 0", borderBottom:"1px solid #060d18" }}>
+                  <span style={{ fontSize:13, color:"#667799" }}>{label}</span>
+                  <span style={{ fontSize:13, color:"#00aaff", fontFamily:"monospace" }}>{val}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={finish} style={{
+              background:"linear-gradient(135deg,#0044aa,#0066cc)",
+              border:"none", borderRadius:10, color:"#fff",
+              padding:"16px 48px", fontSize:17, cursor:"pointer",
+              fontFamily:"'Rajdhani',sans-serif", fontWeight:700, letterSpacing:1,
+              boxShadow:"0 4px 30px #0044aa44",
+            }}>🐒 Launch SMONKIE</button>
+            <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace", marginTop:12 }}>
+              ⚠ NOT FINANCIAL ADVICE · Trade responsibly
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

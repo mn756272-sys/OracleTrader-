@@ -1,0 +1,245 @@
+import { useState } from "react";
+
+const TRADES = [
+  { sym:"EUR/USD", side:"BUY", rr:1.9, won:true, tf:"1h", month:"May" },
+  { sym:"Boom 1000", side:"BUY", rr:-1, won:false, tf:"15m", month:"May" },
+  { sym:"XAU/USD", side:"SELL", rr:2.1, won:true, tf:"4h", month:"May" },
+  { sym:"GBP/USD", side:"BUY", rr:1.8, won:true, tf:"1h", month:"May" },
+  { sym:"Crash 500", side:"SELL", rr:-1, won:false, tf:"15m", month:"May" },
+  { sym:"USD/ZAR", side:"BUY", rr:2.5, won:true, tf:"1h", month:"May" },
+  { sym:"SPY", side:"BUY", rr:1.6, won:true, tf:"4h", month:"May" },
+  { sym:"EUR/USD", side:"SELL", rr:-1, won:false, tf:"1h", month:"Apr" },
+  { sym:"Boom 1000", side:"BUY", rr:3.1, won:true, tf:"15m", month:"Apr" },
+  { sym:"XAU/USD", side:"BUY", rr:2.0, won:true, tf:"1d", month:"Apr" },
+  { sym:"GBP/USD", side:"SELL", rr:1.7, won:true, tf:"1h", month:"Apr" },
+  { sym:"USD/ZAR", side:"SELL", rr:-1, won:false, tf:"4h", month:"Apr" },
+];
+
+const MONTHLY = [
+  { month:"Jan", pnl:3.2, trades:8 },
+  { month:"Feb", pnl:-1.1, trades:6 },
+  { month:"Mar", pnl:5.8, trades:11 },
+  { month:"Apr", pnl:4.2, trades:12 },
+  { month:"May", pnl:7.1, trades:7 },
+];
+
+export default function PerformanceAnalytics() {
+  const [period, setPeriod] = useState("All");
+
+  const filtered = period==="All" ? TRADES : TRADES.filter(t => t.month===period);
+  const wins = filtered.filter(t => t.won).length;
+  const losses = filtered.filter(t => !t.won).length;
+  const total = filtered.length;
+  const winRate = total>0 ? Math.round((wins/total)*100) : 0;
+  const totalR = filtered.reduce((a,t) => a+t.rr, 0);
+  const avgR = total>0 ? (totalR/total).toFixed(2) : 0;
+  const maxDD = 12.4;
+
+  // Per instrument breakdown
+  const byInst = {};
+  filtered.forEach(t => {
+    if (!byInst[t.sym]) byInst[t.sym] = { wins:0, losses:0, totalR:0 };
+    if (t.won) byInst[t.sym].wins++;
+    else byInst[t.sym].losses++;
+    byInst[t.sym].totalR += t.rr;
+  });
+  const instStats = Object.entries(byInst)
+    .map(([sym,s]) => ({
+      sym,
+      winRate: Math.round((s.wins/(s.wins+s.losses))*100),
+      totalR: parseFloat(s.totalR.toFixed(1)),
+      trades: s.wins+s.losses,
+    }))
+    .sort((a,b) => b.totalR-a.totalR);
+
+  // Per TF breakdown
+  const byTF = {};
+  filtered.forEach(t => {
+    if (!byTF[t.tf]) byTF[t.tf] = { wins:0, losses:0 };
+    if (t.won) byTF[t.tf].wins++;
+    else byTF[t.tf].losses++;
+  });
+
+  // Equity curve
+  let bal = 1000;
+  const equity = [bal];
+  filtered.forEach(t => {
+    bal += t.won ? bal*0.015*Math.abs(t.rr) : -bal*0.01;
+    equity.push(parseFloat(bal.toFixed(2)));
+  });
+
+  const maxEq = Math.max(...equity), minEq = Math.min(...equity);
+  const eqRange = maxEq-minEq||1;
+  const eqPts = equity.map((v,i) =>
+    `${(i/(equity.length-1))*380},${68-((v-minEq)/eqRange)*64}`
+  ).join(" ");
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.3s ease}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12,
+          color:"#00aaff", letterSpacing:2, marginBottom:4 }}>SMONKIE TRADER</div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:20 }}>
+          📈 Performance
+        </div>
+
+        {/* Period filter */}
+        <div style={{ display:"flex", gap:6, marginBottom:16, overflowX:"auto", scrollbarWidth:"none" }}>
+          {["All","May","Apr","Mar","Feb","Jan"].map(p => (
+            <button key={p} onClick={() => setPeriod(p)} style={{
+              background: period===p ? "#0044aa22" : "#080f1e",
+              border: `1px solid ${period===p ? "#0044aa" : "#0d1e32"}`,
+              borderRadius:20, color: period===p ? "#00aaff" : "#334466",
+              fontSize:11, padding:"5px 14px", cursor:"pointer",
+              fontFamily:"monospace", flexShrink:0, transition:"all 0.2s",
+            }}>{p}</button>
+          ))}
+        </div>
+
+        {/* Main stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+          {[
+            { label:"Win Rate", val:`${winRate}%`, color:winRate>=60?"#00ff88":winRate>=50?"#ffcc00":"#ff4466", sub:`${wins}W · ${losses}L` },
+            { label:"Total R", val:`${totalR>=0?"+":""}${totalR.toFixed(1)}R`, color:totalR>=0?"#00ff88":"#ff4466", sub:`${total} trades` },
+            { label:"Avg R/Trade", val:`${parseFloat(avgR)>=0?"+":""}${avgR}R`, color:parseFloat(avgR)>=1?"#00ff88":"#ffcc00", sub:"Per trade" },
+            { label:"Max Drawdown", val:`${maxDD}%`, color:maxDD<10?"#00ff88":maxDD<20?"#ffcc00":"#ff4466", sub:"Peak to trough" },
+          ].map(s => (
+            <div key={s.label} style={{ background:"#080f1e", border:"1px solid #0d1e32",
+              borderRadius:10, padding:"14px 12px" }}>
+              <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>{s.label}</div>
+              <div style={{ fontSize:22, fontWeight:900, color:s.color, fontFamily:"monospace" }}>{s.val}</div>
+              <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", marginTop:2 }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Equity curve */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:10 }}>EQUITY CURVE</div>
+          <svg width="100%" height="80" viewBox="0 0 380 80" style={{ display:"block" }}>
+            <rect width="380" height="80" fill="#04080f" rx="4"/>
+            <line x1="0" y1="40" x2="380" y2="40" stroke="#0d1e32" strokeWidth="0.5" strokeDasharray="3,6"/>
+            {equity.length>1 && (
+              <>
+                <polygon points={`0,78 ${eqPts} ${(equity.length-1)/(equity.length-1)*380},78`}
+                  fill={equity[equity.length-1]>=1000?"#00ff8815":"#ff446615"}/>
+                <polyline points={eqPts} fill="none"
+                  stroke={equity[equity.length-1]>=1000?"#00ff88":"#ff4466"} strokeWidth="2"/>
+              </>
+            )}
+          </svg>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:9,
+            color:"#334466", fontFamily:"monospace", marginTop:4 }}>
+            <span>Start $1,000</span>
+            <span style={{ color:equity[equity.length-1]>=1000?"#00ff88":"#ff4466" }}>
+              End ${equity[equity.length-1].toFixed(0)}
+            </span>
+          </div>
+        </div>
+
+        {/* Monthly bars */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:12 }}>MONTHLY P&L (%)</div>
+          <div style={{ display:"flex", gap:8, alignItems:"flex-end", height:80, justifyContent:"space-between" }}>
+            {MONTHLY.map(m => {
+              const maxAbs = Math.max(...MONTHLY.map(x => Math.abs(x.pnl)));
+              const h = Math.abs(m.pnl)/maxAbs*64;
+              const isPos = m.pnl >= 0;
+              return (
+                <div key={m.month} style={{ flex:1, display:"flex", flexDirection:"column",
+                  alignItems:"center", gap:4 }}>
+                  <div style={{ fontSize:9, color:isPos?"#00ff88":"#ff4466",
+                    fontFamily:"monospace" }}>
+                    {isPos?"+":""}{m.pnl}%
+                  </div>
+                  <div style={{ width:"100%", height:h,
+                    background:isPos?"linear-gradient(180deg,#00ff88,#44cc88)":"linear-gradient(180deg,#ff4466,#cc2244)",
+                    borderRadius:"3px 3px 0 0", minHeight:2 }}/>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{m.month}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* By instrument */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:12 }}>BY INSTRUMENT</div>
+          {instStats.map((s,i) => (
+            <div key={s.sym} style={{ padding:"8px 0",
+              borderBottom:i<instStats.length-1?"1px solid #06101c":"none" }}>
+              <div style={{ display:"flex", justifyContent:"space-between",
+                alignItems:"center", marginBottom:4 }}>
+                <div>
+                  <span style={{ fontSize:13, fontWeight:700, color:"#ddeeff" }}>{s.sym}</span>
+                  <span style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+                    marginLeft:8 }}>{s.trades} trades</span>
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <span style={{ fontSize:11, color:s.winRate>=60?"#00ff88":"#ffcc00",
+                    fontFamily:"monospace" }}>{s.winRate}%</span>
+                  <span style={{ fontSize:11, color:s.totalR>=0?"#00ff88":"#ff4466",
+                    fontFamily:"monospace", fontWeight:"bold" }}>
+                    {s.totalR>=0?"+":""}{s.totalR}R
+                  </span>
+                </div>
+              </div>
+              <div style={{ height:3, background:"#0d1e32", borderRadius:2, overflow:"hidden" }}>
+                <div style={{ width:`${s.winRate}%`, height:"100%",
+                  background:s.winRate>=60?"#00ff88":"#ffcc00",
+                  borderRadius:2, transition:"width 0.5s" }}/>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* By timeframe */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:12 }}>BY TIMEFRAME</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+            {Object.entries(byTF).map(([tf,s]) => {
+              const wr = Math.round((s.wins/(s.wins+s.losses))*100);
+              return (
+                <div key={tf} style={{ background:"#060d18", border:"1px solid #0d1e32",
+                  borderRadius:8, padding:"10px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, fontWeight:900, fontFamily:"monospace",
+                    color:"#00aaff" }}>{tf}</div>
+                  <div style={{ fontSize:16, fontWeight:900,
+                    color:wr>=60?"#00ff88":wr>=50?"#ffcc00":"#ff4466",
+                    fontFamily:"monospace" }}>{wr}%</div>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>
+                    {s.wins}W {s.losses}L
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+          textAlign:"center", marginTop:8 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

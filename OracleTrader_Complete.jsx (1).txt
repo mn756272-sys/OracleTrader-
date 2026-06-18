@@ -1,0 +1,1167 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ╔══════════════════════════════════════════════════╗
+//  ORACLE TRADER v1.0 — COMPLETE APP
+//  All features in one file
+// ╚══════════════════════════════════════════════════╝
+
+// ── BRAND ─────────────────────────────────────────
+const BRAND = { name:"ORACLE TRADER", icon:"🔮", color:"#9944ff", accent:"#cc77ff" };
+
+// ── INSTRUMENT CONFIG ─────────────────────────────
+const INSTRUMENTS = {
+  "EUR/USD":    { base:1.0842, type:"FOREX",     vol:0.0005, spike:null },
+  "GBP/USD":    { base:1.2731, type:"FOREX",     vol:0.0006, spike:null },
+  "USD/ZAR":    { base:18.640, type:"FOREX",     vol:0.012,  spike:null },
+  "USD/JPY":    { base:149.82, type:"FOREX",     vol:0.08,   spike:null },
+  "AUD/USD":    { base:0.6512, type:"FOREX",     vol:0.0004, spike:null },
+  "XAU/USD":    { base:2341.5, type:"COMMODITY", vol:0.5,    spike:null },
+  "SPY":        { base:524.60, type:"ETF",       vol:0.4,    spike:null },
+  "BTC/USD":    { base:67420,  type:"CRYPTO",    vol:180,    spike:null },
+  "ETH/USD":    { base:3520,   type:"CRYPTO",    vol:25,     spike:null },
+  "Boom 1000":  { base:9480,   type:"SYNTHETIC", vol:1.4, spike:{ dir:"UP",   freq:55, mag:90 } },
+  "Boom 500":   { base:9120,   type:"SYNTHETIC", vol:1.8, spike:{ dir:"UP",   freq:28, mag:70 } },
+  "Crash 1000": { base:9350,   type:"SYNTHETIC", vol:1.4, spike:{ dir:"DOWN", freq:55, mag:90 } },
+  "Crash 500":  { base:9050,   type:"SYNTHETIC", vol:1.8, spike:{ dir:"DOWN", freq:28, mag:70 } },
+  "Vol 75":     { base:8200,   type:"SYNTHETIC", vol:3.0, spike:null },
+};
+
+const TYPE_CFG = {
+  FOREX:     { color:"#00aaff", icon:"💱" },
+  SYNTHETIC: { color:"#9944ff", icon:"⚡" },
+  COMMODITY: { color:"#ffaa00", icon:"🥇" },
+  ETF:       { color:"#00ff88", icon:"📈" },
+  CRYPTO:    { color:"#ff9944", icon:"₿"  },
+};
+
+// ── HELPERS ───────────────────────────────────────
+function genCandles(base, vol, count = 80) {
+  let p = base;
+  return Array.from({ length: count }, () => {
+    const o = p, m = (Math.random() - 0.48) * vol * 12;
+    const h = o + Math.random() * vol * 6, l = o - Math.random() * vol * 5, c = o + m;
+    p = c;
+    return { o, h: Math.max(h, o, c), l: Math.min(l, o, c), c };
+  });
+}
+
+function computeRSI(candles, period = 14) {
+  const closes = candles.map(c => c.c);
+  if (closes.length < period + 1) return 50;
+  let g = 0, l = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) g += d; else l -= d;
+  }
+  const ag = g / period, al = l / period;
+  return al === 0 ? 100 : parseFloat((100 - 100 / (1 + ag / al)).toFixed(1));
+}
+
+function toHeikinAshi(candles) {
+  const ha = [];
+  candles.forEach((c, i) => {
+    const haC = (c.o + c.h + c.l + c.c) / 4;
+    const haO = i === 0 ? (c.o + c.c) / 2 : (ha[i - 1].o + ha[i - 1].c) / 2;
+    ha.push({ o: haO, h: Math.max(c.h, haO, haC), l: Math.min(c.l, haO, haC), c: haC });
+  });
+  return ha;
+}
+
+function findSwings(candles, lb = 4) {
+  const highs = [], lows = [];
+  for (let i = lb; i < candles.length - lb; i++) {
+    if (candles.slice(i - lb, i).every(c => c.h <= candles[i].h) &&
+        candles.slice(i + 1, i + lb + 1).every(c => c.h <= candles[i].h))
+      highs.push({ idx: i, price: candles[i].h });
+    if (candles.slice(i - lb, i).every(c => c.l >= candles[i].l) &&
+        candles.slice(i + 1, i + lb + 1).every(c => c.l >= candles[i].l))
+      lows.push({ idx: i, price: candles[i].l });
+  }
+  return { highs, lows };
+}
+
+function classifyStructure(highs, lows) {
+  return {
+    labeledHighs: highs.map((s, i) => ({
+      ...s,
+      label: i === 0 ? "SH" : s.price > highs[i - 1].price ? "HH" : "LH",
+      color: i === 0 ? "#aabbdd" : s.price > highs[i - 1].price ? "#00ff88" : "#ff4466",
+    })),
+    labeledLows: lows.map((s, i) => ({
+      ...s,
+      label: i === 0 ? "SL" : s.price > lows[i - 1].price ? "HL" : "LL",
+      color: i === 0 ? "#aabbdd" : s.price > lows[i - 1].price ? "#00ff88" : "#ff4466",
+    })),
+  };
+}
+
+function getMarketBias(lH, lL) {
+  const bull = lH.slice(-3).filter(h => h.label === "HH").length + lL.slice(-3).filter(l => l.label === "HL").length;
+  const bear = lH.slice(-3).filter(h => h.label === "LH").length + lL.slice(-3).filter(l => l.label === "LL").length;
+  if (bull > bear) return { bias: "BULLISH", color: "#00ff88" };
+  if (bear > bull) return { bias: "BEARISH", color: "#ff4466" };
+  return { bias: "RANGING", color: "#ffcc00" };
+}
+
+function getTL(pts, count) {
+  if (pts.length < 2) return null;
+  const [p1, p2] = pts.slice(-2);
+  const slope = (p2.price - p1.price) / (p2.idx - p1.idx);
+  return { x1: p1.idx, y1: p1.price, x2: count - 1, y2: p2.price + slope * (count - 1 - p2.idx) };
+}
+
+function computeFib(high, low) {
+  const d = high - low;
+  return [
+    { price: low,        label: "0%",   color: "#ff4466" },
+    { price: low+d*.382, label: "38.2%",color: "#ffcc00" },
+    { price: low+d*.5,   label: "50%",  color: "#aabbdd" },
+    { price: low+d*.618, label: "61.8%",color: "#00aaff" },
+    { price: high,       label: "100%", color: "#00ff88" },
+  ];
+}
+
+function getSignal(sym, candles, rsi, spiked) {
+  const cfg = INSTRUMENTS[sym];
+  const closes = candles.map(c => c.c);
+  const trend = closes.at(-1) > closes.at(-6) ? "UP" : "DOWN";
+  if (cfg?.spike) {
+    if (cfg.spike.dir === "UP") {
+      if (spiked) return { type:"SELL", strength:"STRONG",  color:"#ff4466", note:"Spike — fade it" };
+      if (rsi<=35)  return { type:"BUY",  strength:"STRONG",  color:"#00ff88", note:"Oversold — spike incoming" };
+      return       { type:"HOLD", strength:"NEUTRAL", color:"#ffcc00", note:"Wait for setup" };
+    }
+    if (spiked)   return { type:"BUY",  strength:"STRONG",  color:"#00ff88", note:"Crash — bounce play" };
+    if (rsi>=65)  return { type:"SELL", strength:"STRONG",  color:"#ff4466", note:"Overbought — crash incoming" };
+    return         { type:"HOLD", strength:"NEUTRAL", color:"#ffcc00", note:"Wait" };
+  }
+  if (rsi <= 30) return { type:"BUY",  strength:"STRONG",   color:"#00ff88", note:"RSI Oversold" };
+  if (rsi >= 70) return { type:"SELL", strength:"STRONG",   color:"#ff4466", note:"RSI Overbought" };
+  if (rsi <= 42 && trend === "UP")   return { type:"BUY",  strength:"MODERATE", color:"#44cc88", note:"Bullish momentum" };
+  if (rsi >= 60 && trend === "DOWN") return { type:"SELL", strength:"MODERATE", color:"#ff6644", note:"Bearish momentum" };
+  return { type:"HOLD", strength:"NEUTRAL", color:"#ffcc00", note:"No clear signal" };
+}
+
+// ── MARKET DATA HOOK ──────────────────────────────
+function useMarketData() {
+  const [data, setData] = useState(() => {
+    const d = {};
+    Object.entries(INSTRUMENTS).forEach(([k, cfg]) => {
+      const candles = genCandles(cfg.base, cfg.vol);
+      d[k] = { price: candles.at(-1).c, changePct: 0, candles,
+               history: candles.map(c => c.c).slice(-40),
+               spiked: false, type: cfg.type };
+    });
+    return d;
+  });
+  const [isLive, setIsLive] = useState(false);
+  const [status, setStatus] = useState("sim");
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setData(prev => {
+        const next = { ...prev };
+        Object.entries(INSTRUMENTS).forEach(([sym, cfg]) => {
+          const d = next[sym];
+          let delta = (Math.random() - 0.499) * cfg.vol * 8;
+          let spiked = false;
+          if (cfg.spike) {
+            delta += cfg.spike.dir === "UP" ? -cfg.vol * 0.5 : cfg.vol * 0.5;
+            if (Math.random() < 1 / cfg.spike.freq) {
+              delta += cfg.spike.dir === "UP" ? cfg.spike.mag : -cfg.spike.mag;
+              spiked = true;
+            }
+          }
+          const last = d.candles.at(-1);
+          const nc = parseFloat(Math.max(cfg.base * 0.5, last.c + delta).toFixed(cfg.type === "FOREX" ? 4 : 2));
+          const candles = [...d.candles.slice(1), { o: last.c, h: Math.max(last.c, nc) + Math.abs(delta) * 0.2, l: Math.min(last.c, nc) - Math.abs(delta) * 0.2, c: nc }];
+          const history = candles.map(c => c.c).slice(-40);
+          const changePct = parseFloat(((nc - history[0]) / history[0] * 100).toFixed(3));
+          next[sym] = { ...d, price: nc, changePct, candles, history, spiked };
+        });
+        return next;
+      });
+    }, 1600);
+    return () => clearInterval(iv);
+  }, []);
+
+  const fetchLive = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:8000/prices", { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error();
+      const json = await res.json();
+      if (Object.keys(json).length > 0) { setData(json); setIsLive(true); setStatus("live"); }
+    } catch { setIsLive(false); setStatus("sim"); }
+  }, []);
+
+  useEffect(() => { fetchLive(); const iv = setInterval(fetchLive, 30000); return () => clearInterval(iv); }, [fetchLive]);
+  return { data, isLive, status, retry: fetchLive };
+}
+
+// ── SMALL COMPONENTS ──────────────────────────────
+function RsiBar({ value }) {
+  const c = value <= 30 ? "#00ff88" : value >= 70 ? "#ff4466" : "#6688aa";
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+      <div style={{ flex:1, height:4, background:"#1a2235", borderRadius:2, overflow:"hidden" }}>
+        <div style={{ width:`${value}%`, height:"100%", background:c, borderRadius:2, transition:"width 0.5s" }} />
+      </div>
+      <span style={{ fontSize:11, color:c, fontFamily:"monospace", minWidth:28 }}>{value}</span>
+    </div>
+  );
+}
+
+function Spark({ data, color, spiked }) {
+  const w = 60, h = 22;
+  const min = Math.min(...data), max = Math.max(...data), range = max - min || 0.0001;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * (h - 2) + 1}`).join(" ");
+  return (
+    <svg width={w} height={h} style={{ display:"block" }}>
+      {spiked && <rect width={w} height={h} fill={color + "15"} rx="2" />}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={spiked ? 2 : 1.5} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── FULL CHART ────────────────────────────────────
+function OracleChart({ sym, instrument }) {
+  const [show, setShow] = useState({ trend:true, sr:true, struct:true, fib:false, ha:false, vp:false });
+  const candles = instrument?.candles || [];
+  if (candles.length < 10) return <div style={{ textAlign:"center", padding:30, color:"#334466", fontFamily:"monospace" }}>Loading chart...</div>;
+
+  const display = show.ha ? toHeikinAshi(candles) : candles;
+  const W = 360, CH = 220, RH = 48, PL = 50, PR = 8, PT = 8, CW = W - PL - PR;
+  const allP = display.flatMap(c => [c.h, c.l]);
+  const minP = Math.min(...allP), maxP = Math.max(...allP), rng = maxP - minP || 0.0001;
+  const bW = CW / candles.length;
+  const px = i => PL + i * bW + bW / 2;
+  const py = v => PT + CH - ((v - minP) / rng) * CH;
+  const fmt = v => instrument?.type === "FOREX" ? parseFloat(v).toFixed(4) : parseFloat(v).toFixed(1);
+
+  const { highs, lows } = findSwings(candles);
+  const { labeledHighs, labeledLows } = classifyStructure(highs, lows);
+  const bias = getMarketBias(labeledHighs, labeledLows);
+  const upTL = getTL(lows.slice(-4), candles.length);
+  const dwTL = getTL(highs.slice(-4), candles.length);
+  const fibH = highs.length ? Math.max(...highs.slice(-2).map(h => h.price)) : maxP;
+  const fibL = lows.length  ? Math.min(...lows.slice(-2).map(l => l.price))  : minP;
+  const fibs = computeFib(fibH, fibL);
+
+  const rsiArr = candles.map((_, i) => {
+    if (i < 14) return 50;
+    const sl = candles.slice(i - 14, i + 1).map(c => c.c);
+    let g = 0, l = 0;
+    for (let j = 1; j < sl.length; j++) { const d = sl[j] - sl[j - 1]; if (d > 0) g += d; else l -= d; }
+    const ag = g / 14, al = l / 14;
+    return al === 0 ? 100 : parseFloat((100 - 100 / (1 + ag / al)).toFixed(1));
+  });
+  const rsiPts = rsiArr.map((v, i) => `${px(i)},${PT + CH + RH + 2 - ((v / 100) * (RH - 4))}`).join(" ");
+  const lastRSI = rsiArr.at(-1);
+  const rsiC = lastRSI <= 30 ? "#00ff88" : lastRSI >= 70 ? "#ff4466" : "#cc77ff";
+
+  const tcoords = line => line ? { x1:px(line.x1), y1:py(line.y1), x2:px(line.x2), y2:py(line.y2) } : null;
+  const upC = tcoords(upTL), dwC = tcoords(dwTL);
+  const totalH = PT + CH + RH + 20;
+  const curY = py(instrument.price);
+  const up = instrument.changePct >= 0;
+
+  const TOGGLES = [
+    { k:"ha",     label:"HA",    color:"#ffcc00" },
+    { k:"trend",  label:"Trend", color:"#9944ff" },
+    { k:"sr",     label:"S/R",   color:"#ffcc00" },
+    { k:"struct", label:"HH/LL", color:"#00aaff" },
+    { k:"fib",    label:"Fib",   color:"#00ff88" },
+  ];
+
+  return (
+    <div style={{ background:"#06101c", borderRadius:10, overflow:"hidden", marginBottom:12 }}>
+      <div style={{ display:"flex", gap:4, padding:"8px 10px", borderBottom:"1px solid #0d1e32", flexWrap:"wrap" }}>
+        {TOGGLES.map(b => (
+          <button key={b.k} onClick={() => setShow(p => ({ ...p, [b.k]: !p[b.k] }))} style={{
+            background: show[b.k] ? b.color + "22" : "#080f1e",
+            border: `1px solid ${show[b.k] ? b.color + "66" : "#0d1e32"}`,
+            borderRadius:20, color: show[b.k] ? b.color : "#334466",
+            fontSize:10, padding:"3px 10px", cursor:"pointer", fontFamily:"monospace",
+          }}>{b.label}</button>
+        ))}
+        <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:5 }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:bias.color }} />
+          <span style={{ fontSize:10, color:bias.color, fontFamily:"monospace" }}>{bias.bias}</span>
+        </div>
+      </div>
+
+      <svg width="100%" viewBox={`0 0 ${W} ${totalH}`} style={{ display:"block" }}>
+        <defs><clipPath id="ch"><rect x={PL} y={PT} width={CW} height={CH} /></clipPath></defs>
+        <rect x={PL} y={PT} width={CW} height={CH} fill="#04080f" rx="2" />
+
+        {/* Grid */}
+        {[0, .25, .5, .75, 1].map((f, i) => {
+          const pv = maxP - f * rng, yp = PT + f * CH;
+          return (<g key={i}>
+            <line x1={PL} y1={yp} x2={PL + CW} y2={yp} stroke="#0a1830" strokeWidth="0.5" strokeDasharray="3,6" />
+            <text x={PL - 3} y={yp + 3} textAnchor="end" fill="#223344" fontSize="7" fontFamily="monospace">{fmt(pv)}</text>
+          </g>);
+        })}
+
+        {/* Fibonacci */}
+        {show.fib && fibs.map((fib, i) => {
+          const yf = py(fib.price);
+          if (yf < PT || yf > PT + CH) return null;
+          return (<g key={i}>
+            <line x1={PL} y1={yf} x2={PL + CW} y2={yf} stroke={fib.color} strokeWidth="0.6" strokeDasharray="2,5" opacity="0.5" />
+            <text x={PL + CW - 2} y={yf - 1} textAnchor="end" fill={fib.color} fontSize="6" fontFamily="monospace" opacity="0.8">{fib.label}</text>
+          </g>);
+        })}
+
+        {/* Support / Resistance */}
+        {show.sr && [...highs.slice(-3).map(h => ({ price:h.price, type:"R" })), ...lows.slice(-3).map(l => ({ price:l.price, type:"S" }))].map((sr, i) => {
+          const ys = py(sr.price);
+          if (ys < PT || ys > PT + CH) return null;
+          const col = sr.type === "R" ? "#ff4466" : "#00ff88";
+          return (<g key={i}>
+            <line x1={PL} y1={ys} x2={PL + CW} y2={ys} stroke={col} strokeWidth="0.8" strokeDasharray="4,4" opacity="0.7" />
+            <rect x={PL} y={ys - 7} width={14} height={8} fill={col + "22"} rx="1" />
+            <text x={PL + 7} y={ys - 1} textAnchor="middle" fill={col} fontSize="6" fontFamily="monospace" fontWeight="bold">{sr.type}</text>
+          </g>);
+        })}
+
+        {/* Trend lines */}
+        {show.trend && upC && <g clipPath="url(#ch)"><line x1={upC.x1} y1={upC.y1} x2={upC.x2} y2={upC.y2} stroke="#00ff88" strokeWidth="1.2" strokeDasharray="5,3" opacity="0.8" /></g>}
+        {show.trend && dwC && <g clipPath="url(#ch)"><line x1={dwC.x1} y1={dwC.y1} x2={dwC.x2} y2={dwC.y2} stroke="#ff4466" strokeWidth="1.2" strokeDasharray="5,3" opacity="0.8" /></g>}
+        {show.trend && upC && upC.y2 > PT && upC.y2 < PT + CH && <text x={upC.x2 + 2} y={upC.y2} fill="#00ff88" fontSize="7" fontFamily="monospace">↑UPT</text>}
+        {show.trend && dwC && dwC.y2 > PT && dwC.y2 < PT + CH && <text x={dwC.x2 + 2} y={dwC.y2} fill="#ff4466" fontSize="7" fontFamily="monospace">↓DWT</text>}
+
+        {/* Candles */}
+        <g clipPath="url(#ch)">
+          {display.map((c, i) => {
+            const x = px(i), isUp = c.c >= c.o;
+            const col = instrument.spiked && i === candles.length - 1 ? "#9944ff"
+              : show.ha ? (isUp ? "#00ff88" : "#ff4466")
+              : (isUp ? "#00cc66" : "#ff3355");
+            const bT = py(Math.max(c.o, c.c)), bB = py(Math.min(c.o, c.c));
+            return (<g key={i}>
+              <line x1={x} y1={py(c.h)} x2={x} y2={py(c.l)} stroke={col} strokeWidth="0.7" />
+              <rect x={x - bW * .38} y={bT} width={bW * .76} height={Math.max(bB - bT, 1)}
+                fill={show.ha ? col : col + "55"} stroke={col} strokeWidth="0.7" rx="0.3" />
+            </g>);
+          })}
+        </g>
+
+        {/* HH/HL/LH/LL */}
+        {show.struct && labeledHighs.slice(-6).map((h, i) => {
+          const xH = px(h.idx), yH = py(h.price) - 10;
+          if (xH < PL || xH > PL + CW || yH < PT - 2) return null;
+          return (<g key={i}>
+            <circle cx={xH} cy={py(h.price)} r="2.5" fill={h.color} opacity="0.9" />
+            <rect x={xH - 8} y={yH - 7} width={16} height={8} fill="#04080f" opacity="0.85" rx="2" />
+            <text x={xH} y={yH} textAnchor="middle" fill={h.color} fontSize="7" fontFamily="monospace" fontWeight="bold">{h.label}</text>
+          </g>);
+        })}
+        {show.struct && labeledLows.slice(-6).map((l, i) => {
+          const xL = px(l.idx), yL = py(l.price) + 16;
+          if (xL < PL || xL > PL + CW || yL > PT + CH + 4) return null;
+          return (<g key={i}>
+            <circle cx={xL} cy={py(l.price)} r="2.5" fill={l.color} opacity="0.9" />
+            <rect x={xL - 8} y={yL - 7} width={16} height={8} fill="#04080f" opacity="0.85" rx="2" />
+            <text x={xL} y={yL} textAnchor="middle" fill={l.color} fontSize="7" fontFamily="monospace" fontWeight="bold">{l.label}</text>
+          </g>);
+        })}
+
+        {/* Current price line */}
+        {(() => {
+          const col = up ? "#00ff88" : "#ff4466";
+          return (<g>
+            <line x1={PL} y1={curY} x2={PL + CW} y2={curY} stroke={col} strokeWidth="0.6" strokeDasharray="2,4" opacity="0.9" />
+            <rect x={PL + CW} y={curY - 6} width={50} height={12} fill={col + "33"} rx="2" />
+            <text x={PL + CW + 2} y={curY + 3} fill={col} fontSize="7" fontFamily="monospace">{fmt(instrument.price)}</text>
+          </g>);
+        })()}
+
+        {/* RSI panel */}
+        <line x1={PL} y1={PT + CH + 4} x2={PL + CW} y2={PT + CH + 4} stroke="#0d1e32" strokeWidth="1" />
+        <rect x={PL} y={PT + CH + 4} width={CW} height={RH} fill="#030710" opacity="0.8" />
+        <text x={PL - 3} y={PT + CH + 10} textAnchor="end" fill="#334466" fontSize="6" fontFamily="monospace">RSI</text>
+        <line x1={PL} y1={PT + CH + 4 + RH * .3} x2={PL + CW} y2={PT + CH + 4 + RH * .3} stroke="#ff446614" strokeWidth="0.5" />
+        <line x1={PL} y1={PT + CH + 4 + RH * .7} x2={PL + CW} y2={PT + CH + 4 + RH * .7} stroke="#00ff8814" strokeWidth="0.5" />
+        <polyline points={rsiPts} fill="none" stroke="#cc77ff" strokeWidth="1.2" opacity="0.9" />
+        <text x={PL - 3} y={PT + CH + RH} textAnchor="end" fill={rsiC} fontSize="7" fontFamily="monospace">{lastRSI}</text>
+      </svg>
+
+      {show.struct && (
+        <div style={{ display:"flex", gap:8, padding:"6px 10px", borderTop:"1px solid #0d1e32", flexWrap:"wrap" }}>
+          {[["HH","Higher High","#00ff88"],["HL","Higher Low","#00ff88"],["LH","Lower High","#ff4466"],["LL","Lower Low","#ff4466"]].map(([label, desc, color]) => (
+            <div key={label} style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:color }} />
+              <span style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{label}={desc}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── AI CHAT ───────────────────────────────────────
+async function askOracle(messages, snapshot) {
+  const sys = `You are ORACLE, an elite AI trading analyst. You see all — technical analysis, market structure (HH/HL/LH/LL), Fibonacci, RSI, MACD, Boom/Crash synthetic indices, and crypto.
+Live market: ${snapshot}
+Rules: Max 130 words. Sharp and authoritative. Give entry/SL/TP. Never guarantee returns. Risk 1-2% max.`;
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:sys,
+      messages: messages.map(m => ({ role:m.role, content:m.content })) }),
+  });
+  const d = await res.json();
+  return d.content?.[0]?.text || "Oracle signal unavailable.";
+}
+
+// ── STATIC DATA ───────────────────────────────────
+const NEWS_DATA = [
+  { id:1, time:"2m",  source:"Reuters",    headline:"ECB signals pause as inflation stays sticky",         tickers:["EUR/USD"],                       impact:"HIGH",   sentiment:"BEARISH",    summary:"ECB officials indicated a rate hold at next meeting after CPI exceeded expectations. EUR/USD bulls on alert." },
+  { id:2, time:"15m", source:"Bloomberg",  headline:"Bitcoin surges past $68K on record ETF inflows",     tickers:["BTC/USD","ETH/USD"],             impact:"HIGH",   sentiment:"BULLISH",    summary:"BTC climbed to 3-week high driven by institutional demand through spot ETFs. Analysts target $72K." },
+  { id:3, time:"32m", source:"ForexFactory",headline:"US NFP beats forecast at 203K vs 185K expected",   tickers:["USD/ZAR","EUR/USD","GBP/USD"],   impact:"HIGH",   sentiment:"USD BULLISH", summary:"Strong jobs data pushed USD higher across the board. USD/ZAR fell sharply." },
+  { id:4, time:"1h",  source:"Kitco",      headline:"Gold retreats from $2,350 resistance on USD strength",tickers:["XAU/USD"],                      impact:"MEDIUM", sentiment:"BEARISH",    summary:"XAU/USD pulled back after failing $2,350. Dollar strength post-NFP weighed on gold." },
+  { id:5, time:"2h",  source:"Deriv",      headline:"Boom & Crash show elevated spike frequency",          tickers:["Boom 1000","Crash 1000"],        impact:"MEDIUM", sentiment:"CAUTION",    summary:"Synthetic indices showed above-average activity ahead of US economic releases. Use wider stops." },
+  { id:6, time:"3h",  source:"Reuters",    headline:"South African rand weakens on load shedding fears",   tickers:["USD/ZAR"],                       impact:"MEDIUM", sentiment:"ZAR BEARISH", summary:"ZAR fell vs majors as Eskom announced stage 4 load shedding for the week." },
+];
+
+const SAMPLE_TRADES = [
+  { id:1, sym:"EUR/USD", side:"BUY",  entry:1.0820, sl:1.0800, tp:1.0860, exit:1.0858, rr:1.9,  won:true,  date:"2025-05-18", note:"Golden cross + RSI oversold" },
+  { id:2, sym:"Boom 1000",side:"BUY", entry:9420,   sl:9390,   tp:9480,   exit:9385,   rr:-1,   won:false, date:"2025-05-17", note:"Spike faded too fast" },
+  { id:3, sym:"XAU/USD", side:"SELL", entry:2345,   sl:2355,   tp:2325,   exit:2326,   rr:1.9,  won:true,  date:"2025-05-16", note:"RSI overbought 72" },
+  { id:4, sym:"BTC/USD", side:"BUY",  entry:67000,  sl:66200,  tp:68600,  exit:68550,  rr:1.95, won:true,  date:"2025-05-15", note:"Volume breakout setup" },
+];
+
+const SESSIONS = [
+  { name:"Sydney",   flag:"🇦🇺", color:"#00aaff", open:22, close:7,  pairs:["AUD/USD","NZD/USD"] },
+  { name:"Tokyo",    flag:"🇯🇵", color:"#bb44ff", open:0,  close:9,  pairs:["USD/JPY","EUR/JPY"] },
+  { name:"London",   flag:"🇬🇧", color:"#00ff88", open:8,  close:17, pairs:["EUR/USD","GBP/USD"] },
+  { name:"New York", flag:"🇺🇸", color:"#ffcc00", open:13, close:22, pairs:["USD/CAD","USD/ZAR"] },
+];
+function sessionOpen(o, c) { const h = new Date().getUTCHours() + new Date().getUTCMinutes() / 60; return o < c ? h >= o && h < c : h >= o || h < c; }
+
+// ══════════════════════════════════════════════════
+//  MAIN APP
+// ══════════════════════════════════════════════════
+export default function OracleTrader() {
+  const { data, isLive, status, retry } = useMarketData();
+  const [tab,      setTab]    = useState("dashboard");
+  const [cat,      setCat]    = useState("ALL");
+  const [chartSym, setCS]     = useState("EUR/USD");
+  const [signals,  setSignals]= useState([]);
+  const [msgs,     setMsgs]   = useState([{ role:"assistant", content:`${BRAND.icon} ORACLE online. All-seeing intelligence activated.\n\nI cover Forex, Boom & Crash, Crypto, and Gold.` }]);
+  const [aiInput,  setAiIn]   = useState("");
+  const [aiLoad,   setAiLoad] = useState(false);
+  const [expNews,  setExpN]   = useState(null);
+  const [trades,   setTrades] = useState(SAMPLE_TRADES);
+  const [showAddT, setShowAdd]= useState(false);
+  const [tForm,    setTForm]  = useState({ sym:"EUR/USD", side:"BUY", entry:"", sl:"", tp:"", exit:"", won:true, note:"" });
+  const [rBal,     setRBal]   = useState("1000");
+  const [rPct,     setRPct]   = useState("1");
+  const [rEntry,   setREntry] = useState("");
+  const [rSL,      setRSL]    = useState("");
+  const [rTP,      setRTP]    = useState("");
+  const [settings, setSettings]= useState({ rsiLow:30, rsiHigh:70, tf:"1h", push:true });
+  const [clock,    setClock]  = useState(new Date());
+  const chatEnd = useRef(null);
+
+  useEffect(() => { const iv = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(iv); }, []);
+  useEffect(() => { chatEnd.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs]);
+
+  // Signal scanner
+  useEffect(() => {
+    if (!Object.keys(data).length) return;
+    const ns = [];
+    Object.entries(data).forEach(([sym, d]) => {
+      if (!d.candles || d.candles.length < 10) return;
+      const rsi = computeRSI(d.candles);
+      const sig = getSignal(sym, d.candles, rsi, d.spiked);
+      if (sig.type !== "HOLD" || d.spiked) {
+        ns.push({ sym, rsi, sig, price:d.price, spiked:d.spiked, type:d.type,
+          time: new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
+          id: `${sym}-${Date.now()}` });
+      }
+    });
+    if (ns.length) setSignals(p => [...ns, ...p].slice(0, 30));
+  }, [data]);
+
+  function snapshot() {
+    return Object.entries(data).map(([sym, d]) => {
+      if (!d.candles || d.candles.length < 5) return `${sym}:loading`;
+      const rsi = computeRSI(d.candles);
+      const sig = getSignal(sym, d.candles, rsi, d.spiked);
+      return `${sym}(${d.type}):${d.price} RSI:${rsi} ${sig.type}${d.spiked ? " SPIKE" : ""}`;
+    }).join(" | ");
+  }
+
+  async function sendAI() {
+    const text = aiInput.trim();
+    if (!text || aiLoad) return;
+    const userMsg = { role:"user", content:text };
+    const updated = [...msgs, userMsg];
+    setMsgs(updated); setAiIn(""); setAiLoad(true);
+    try { const reply = await askOracle(updated, snapshot()); setMsgs(p => [...p, { role:"assistant", content:reply }]); }
+    catch  { setMsgs(p => [...p, { role:"assistant", content:"⚠ Oracle signal lost. Retry." }]); }
+    setAiLoad(false);
+  }
+
+  // Risk calculations
+  const bal = parseFloat(rBal) || 0, pct = parseFloat(rPct) || 1;
+  const rAmt = bal * pct / 100;
+  const eP = parseFloat(rEntry) || 0, sP = parseFloat(rSL) || 0, tP = parseFloat(rTP) || 0;
+  const pipR = eP && sP ? Math.abs(eP - sP) : 0;
+  const pipT = eP && tP ? Math.abs(tP - eP) : 0;
+  const rrRatio = pipR > 0 ? (pipT / pipR).toFixed(2) : 0;
+  const potProfit = pipR > 0 && pipT > 0 ? (rAmt * (pipT / pipR)).toFixed(2) : 0;
+  const lotSize = pipR > 0 ? (rAmt / (pipR * 100)).toFixed(2) : 0;
+
+  // Trade stats
+  const wins = trades.filter(t => t.won).length;
+  const losses = trades.filter(t => !t.won).length;
+  const winRate = trades.length ? Math.round((wins / trades.length) * 100) : 0;
+  const totalR = trades.reduce((a, t) => a + t.rr, 0);
+
+  const filtered = Object.entries(data).filter(([, d]) => cat === "ALL" || d.type === cat);
+  const connCfg = { live:{ color:"#00ff88", label:"LIVE", dot:true }, sim:{ color:"#ffcc00", label:"SIM", dot:false } }[status] || { color:"#334466", label:"...", dot:false };
+
+  const TABS = [
+    { id:"dashboard", label:"Home",    icon:"🏠" },
+    { id:"markets",   label:"Markets", icon:"◈"  },
+    { id:"chart",     label:"Chart",   icon:"📊" },
+    { id:"signals",   label:"Signals", icon:"◎"  },
+    { id:"ai",        label:"Oracle",  icon:"🔮" },
+    { id:"screener",  label:"Screen",  icon:"🔍" },
+    { id:"news",      label:"News",    icon:"📰" },
+    { id:"journal",   label:"Journal", icon:"📓" },
+    { id:"risk",      label:"Risk",    icon:"🎯" },
+    { id:"sessions",  label:"Sessions",icon:"🌍" },
+    { id:"stats",     label:"Stats",   icon:"📈" },
+    { id:"settings",  label:"Settings",icon:"⚙"  },
+  ];
+
+  const S = { background:"#060d18", border:"1px solid #0d1e32", borderRadius:8, color:"#aabbd0", padding:"10px 12px", fontSize:13, fontFamily:"monospace", width:"100%" };
+  const Card = ({ style, children }) => <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:14, ...style }}>{children}</div>;
+  const SectionTitle = ({ children }) => <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", letterSpacing:1, marginBottom:10 }}>{children}</div>;
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    ::-webkit-scrollbar{width:3px;height:3px}
+    ::-webkit-scrollbar-track{background:#060d18}
+    ::-webkit-scrollbar-thumb{background:#2a1a4a}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+    @keyframes slidein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes glow{0%,100%{filter:drop-shadow(0 0 8px #9944ff)}50%{filter:drop-shadow(0 0 20px #cc77ff)}}
+    .slidein{animation:slidein 0.25s ease}
+    .glow{animation:glow 3s ease-in-out infinite}
+    input,select,textarea{outline:none}
+    input:focus,select:focus,textarea:focus{border-color:#6622cc !important}
+    input::placeholder,textarea::placeholder{color:#233344}
+    select option{background:#080f1e}
+    input[type=range]{accent-color:#9944ff;width:100%}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18", minHeight:"100vh", color:"#c8d8f0", display:"flex", flexDirection:"column", maxWidth:520, margin:"0 auto" }}>
+
+        {/* ── HEADER ── */}
+        <div style={{ background:"linear-gradient(180deg,#0a0620,#060d18)", borderBottom:"1px solid #1a0a2e", padding:"12px 16px", display:"flex", alignItems:"center", gap:12, position:"sticky", top:0, zIndex:100 }}>
+          <div className="glow" style={{ width:42, height:42, borderRadius:12, fontSize:22, background:"linear-gradient(135deg,#1a0040,#2d0060)", border:"1px solid #6622cc55", display:"flex", alignItems:"center", justifyContent:"center" }}>{BRAND.icon}</div>
+          <div>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:15, color:BRAND.color, letterSpacing:2 }}>{BRAND.name}</div>
+            <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>AI-POWERED · ALL-SEEING · MULTI-MARKET</div>
+          </div>
+          <div style={{ marginLeft:"auto", textAlign:"right" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:5, justifyContent:"flex-end" }}>
+              {connCfg.dot && <div style={{ width:7, height:7, borderRadius:"50%", background:connCfg.color, animation:"pulse 2s infinite" }} />}
+              <span style={{ fontSize:10, color:connCfg.color, fontFamily:"monospace" }}>{connCfg.label}</span>
+            </div>
+            <div style={{ fontSize:8, color:"#1e3050", fontFamily:"monospace", marginTop:1 }}>{clock.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</div>
+          </div>
+        </div>
+
+        {/* ── OFFLINE BANNER ── */}
+        {!isLive && (
+          <div style={{ background:"#110a00", borderBottom:"1px solid #443300", padding:"5px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:10, color:"#aa7700", fontFamily:"monospace" }}>⚠ Simulated data — backend offline</span>
+            <button onClick={retry} style={{ background:"none", border:"1px solid #443300", borderRadius:4, color:"#aa7700", fontSize:9, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace" }}>Retry</button>
+          </div>
+        )}
+
+        {/* ── TICKER TAPE ── */}
+        <div style={{ background:"#06101e", borderBottom:"1px solid #0a1830", padding:"5px 16px", display:"flex", gap:16, overflowX:"auto", scrollbarWidth:"none" }}>
+          {Object.entries(data).slice(0, 8).map(([sym, d]) => {
+            const tc = TYPE_CFG[d.type] || {};
+            return (
+              <div key={sym} style={{ display:"flex", gap:4, alignItems:"baseline", flexShrink:0 }}>
+                <span style={{ fontSize:9, color:tc.color + "88", fontFamily:"monospace" }}>{sym}</span>
+                <span style={{ fontSize:10, color:"#aabbdd", fontFamily:"monospace" }}>{d.price}</span>
+                <span style={{ fontSize:9, color:d.changePct >= 0 ? "#00ff88" : "#ff4466", fontFamily:"monospace" }}>{d.changePct >= 0 ? "+" : ""}{d.changePct}%</span>
+                {d.spiked && <span style={{ fontSize:9, color:"#9944ff" }}>⚡</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── TABS ── */}
+        <div style={{ display:"flex", background:"#060d18", borderBottom:"1px solid #1a0a2e", overflowX:"auto", scrollbarWidth:"none" }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              flexShrink:0, background:"none", border:"none",
+              borderBottom: tab === t.id ? `2px solid ${BRAND.color}` : "2px solid transparent",
+              color: tab === t.id ? BRAND.color : "#334466",
+              padding:"9px 10px", fontSize:10,
+              fontFamily:"'Rajdhani',sans-serif", fontWeight:600,
+              cursor:"pointer", display:"flex", gap:3, alignItems:"center",
+            }}>
+              <span style={{ fontSize:12 }}>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── CONTENT ── */}
+        <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+
+          {/* ═══ DASHBOARD ═══ */}
+          {tab === "dashboard" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+                <div>
+                  <div style={{ fontSize:13, color:"#334466", fontFamily:"monospace" }}>{clock.getHours() < 12 ? "Good morning" : clock.getHours() < 17 ? "Good afternoon" : "Good evening"} 👋</div>
+                  <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff" }}>{BRAND.icon} ORACLE</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:20, color:BRAND.color }}>{clock.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</div>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{clock.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" })}</div>
+                </div>
+              </div>
+
+              {/* Sessions */}
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>MARKET SESSIONS</SectionTitle>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  {SESSIONS.map(s => {
+                    const open = sessionOpen(s.open, s.close);
+                    return (
+                      <div key={s.name} style={{ background:open ? s.color + "12" : "#060d18", border:`1px solid ${open ? s.color + "44" : "#0d1e32"}`, borderRadius:8, padding:"10px 12px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                          <div style={{ width:6, height:6, borderRadius:"50%", background:open ? s.color : "#334466", animation:open ? "pulse 2s infinite" : "none" }} />
+                          <span style={{ fontSize:12, fontWeight:700, color:open ? s.color : "#334466" }}>{s.flag} {s.name}</span>
+                        </div>
+                        <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{s.open}:00 – {s.close}:00 UTC</div>
+                        <div style={{ fontSize:9, color:open ? s.color : "#1e3050", fontFamily:"monospace" }}>{open ? "● OPEN" : "CLOSED"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {/* Top signals */}
+              <Card style={{ marginBottom:12 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                  <SectionTitle>TOP SIGNALS</SectionTitle>
+                  <button onClick={() => setTab("signals")} style={{ background:"none", border:"1px solid #0d1e32", borderRadius:4, color:"#334466", fontSize:9, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace" }}>All →</button>
+                </div>
+                {signals.slice(0, 4).map((s, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom:i < 3 ? "1px solid #06101c" : "none" }}>
+                    <div style={{ width:3, height:28, borderRadius:2, background:s.sig.color, flexShrink:0 }} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff" }}>{s.sym}</div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>RSI {s.rsi} · {s.time}</div>
+                    </div>
+                    <div style={{ background:s.sig.color + "18", border:`1px solid ${s.sig.color}44`, borderRadius:4, padding:"3px 10px", fontSize:11, color:s.sig.color, fontFamily:"monospace", fontWeight:"bold" }}>{s.sig.type}</div>
+                  </div>
+                ))}
+                {!signals.length && <div style={{ textAlign:"center", padding:16, color:"#334466", fontFamily:"monospace", fontSize:11 }}>Scanning markets...</div>}
+              </Card>
+
+              {/* Quick access */}
+              <SectionTitle>QUICK ACCESS</SectionTitle>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+                {[{ icon:"📊", label:"Chart", tab:"chart" }, { icon:"🔍", label:"Screener", tab:"screener" }, { icon:"📰", label:"News", tab:"news" }, { icon:"📓", label:"Journal", tab:"journal" }, { icon:"🎯", label:"Risk", tab:"risk" }, { icon:"🌍", label:"Sessions", tab:"sessions" }].map(item => (
+                  <button key={item.tab} onClick={() => setTab(item.tab)} style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:"12px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
+                    <div style={{ fontSize:22 }}>{item.icon}</div>
+                    <div style={{ fontSize:10, color:"#667799", fontFamily:"monospace" }}>{item.label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ═══ MARKETS ═══ */}
+          {tab === "markets" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ display:"flex", gap:6, marginBottom:12, overflowX:"auto", scrollbarWidth:"none" }}>
+                {["ALL", "FOREX", "SYNTHETIC", "CRYPTO", "COMMODITY", "ETF"].map(c => {
+                  const tc = TYPE_CFG[c] || { color:BRAND.color };
+                  return (
+                    <button key={c} onClick={() => setCat(c)} style={{ background:cat === c ? tc.color + "22" : "#080f1e", border:`1px solid ${cat === c ? tc.color + "88" : "#0d1e32"}`, borderRadius:20, color:cat === c ? tc.color : "#334466", fontSize:11, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontFamily:"monospace", flexShrink:0 }}>{c}</button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:8, letterSpacing:1 }}>◈ {filtered.length} INSTRUMENTS · {isLive ? "REAL" : "SIMULATED"}</div>
+              {filtered.map(([sym, d]) => {
+                if (!d.candles || d.candles.length < 5) return null;
+                const rsi = computeRSI(d.candles);
+                const sig = getSignal(sym, d.candles, rsi, d.spiked);
+                const tc = TYPE_CFG[d.type] || {};
+                const up = d.changePct >= 0;
+                return (
+                  <div key={sym} onClick={() => { setCS(sym); setTab("chart"); }} style={{ background:"#080f1e", border:`1px solid ${d.spiked ? "#9944ff44" : "#0d1e32"}`, borderLeft:`3px solid ${tc.color}44`, borderRadius:8, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                      <div>
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          <span style={{ fontSize:13 }}>{tc.icon}</span>
+                          <span style={{ fontSize:14, fontWeight:700, color:"#ddeeff" }}>{sym}</span>
+                          {d.spiked && <span style={{ background:"#9944ff22", border:"1px solid #9944ff55", borderRadius:4, padding:"1px 6px", fontSize:9, color:"#9944ff", fontFamily:"monospace" }}>⚡</span>}
+                          {isLive && <span style={{ fontSize:8, color:"#00ff8855", fontFamily:"monospace" }}>●LIVE</span>}
+                        </div>
+                        <div style={{ fontSize:9, color:tc.color + "88", fontFamily:"monospace", marginTop:2 }}>{d.type}</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:15, fontWeight:700, color:"#ddeeff", fontFamily:"'Share Tech Mono',monospace" }}>{d.price}</div>
+                        <div style={{ fontSize:10, color:up ? "#00ff88" : "#ff4466", fontFamily:"monospace" }}>{up ? "▲ +" : "▼ "}{d.changePct}%</div>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                      <div style={{ flex:1 }}><div style={{ fontSize:9, color:"#334466", marginBottom:3, fontFamily:"monospace" }}>RSI</div><RsiBar value={rsi} /></div>
+                      <Spark data={d.history.slice(-30)} color={up ? "#00ff88" : "#ff4466"} spiked={d.spiked} />
+                      <div style={{ background:sig.color + "18", border:`1px solid ${sig.color}44`, borderRadius:4, padding:"4px 8px", fontSize:11, color:sig.color, fontFamily:"monospace", fontWeight:"bold", minWidth:48, textAlign:"center" }}>{sig.type}</div>
+                    </div>
+                    <div style={{ marginTop:5, fontSize:9, color:"#1e3050", fontFamily:"monospace" }}>Tap to open chart →</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══ CHART ═══ */}
+          {tab === "chart" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ display:"flex", gap:5, marginBottom:10, overflowX:"auto", scrollbarWidth:"none" }}>
+                {Object.keys(data).map(sym => {
+                  const tc = TYPE_CFG[data[sym]?.type] || {};
+                  return (
+                    <button key={sym} onClick={() => setCS(sym)} style={{ background:chartSym === sym ? tc.color + "22" : "#080f1e", border:`1px solid ${chartSym === sym ? tc.color + "77" : "#0d1e32"}`, borderRadius:20, color:chartSym === sym ? tc.color : "#334466", fontSize:10, padding:"4px 10px", cursor:"pointer", whiteSpace:"nowrap", fontFamily:"monospace", flexShrink:0 }}>{sym}</button>
+                  );
+                })}
+              </div>
+              {data[chartSym] && (() => {
+                const d = data[chartSym];
+                if (!d.candles || d.candles.length < 10) return <div style={{ textAlign:"center", padding:30, color:"#334466", fontFamily:"monospace" }}>Loading...</div>;
+                const rsi = computeRSI(d.candles);
+                const sig = getSignal(chartSym, d.candles, rsi, d.spiked);
+                const tc = TYPE_CFG[d.type] || {};
+                const up = d.changePct >= 0;
+                const { highs, lows } = findSwings(d.candles);
+                const { labeledHighs, labeledLows } = classifyStructure(highs, lows);
+                const bias = getMarketBias(labeledHighs, labeledLows);
+                const isFx = d.type === "FOREX";
+                return (
+                  <>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                      <div>
+                        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                          <span style={{ fontSize:16 }}>{tc.icon}</span>
+                          <span style={{ fontSize:17, fontWeight:700, color:"#ddeeff" }}>{chartSym}</span>
+                          {isLive && <span style={{ fontSize:8, color:"#00ff88", fontFamily:"monospace" }}>●LIVE</span>}
+                        </div>
+                        <div style={{ fontSize:20, fontFamily:"'Share Tech Mono',monospace", color:sig.color, fontWeight:700 }}>
+                          {isFx ? d.price.toFixed(4) : d.price.toFixed(1)}
+                          <span style={{ fontSize:11, color:up ? "#00ff88" : "#ff4466", marginLeft:8, fontFamily:"monospace" }}>{up ? "▲ +" : "▼ "}{d.changePct}%</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ background:sig.color + "20", border:`1px solid ${sig.color}55`, borderRadius:6, padding:"6px 14px", marginBottom:4, fontSize:15, color:sig.color, fontFamily:"monospace", fontWeight:"bold" }}>{sig.type}</div>
+                        <div style={{ display:"flex", gap:4, alignItems:"center", justifyContent:"flex-end" }}>
+                          <div style={{ width:6, height:6, borderRadius:"50%", background:bias.color }} />
+                          <span style={{ fontSize:10, color:bias.color, fontFamily:"monospace" }}>{bias.bias}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <OracleChart sym={chartSym} instrument={d} />
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                      {[
+                        { label:"Last High", val:labeledHighs.at(-1)?.label || "—", color:labeledHighs.at(-1)?.color || "#334466" },
+                        { label:"Last Low",  val:labeledLows.at(-1)?.label  || "—", color:labeledLows.at(-1)?.color  || "#334466" },
+                        { label:"RSI",  val:rsi,       color:rsi<=30?"#00ff88":rsi>=70?"#ff4466":"#cc77ff" },
+                        { label:"Bias", val:bias.bias, color:bias.color },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:6, padding:"8px 10px" }}>
+                          <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{label}</div>
+                          <div style={{ fontSize:13, color, fontFamily:"monospace", fontWeight:"bold", marginTop:2 }}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ background:sig.color + "10", border:`1px solid ${sig.color}33`, borderRadius:8, padding:"10px 14px", fontSize:12, color:sig.color, fontFamily:"monospace" }}>🔮 Oracle: {sig.note}</div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ═══ SIGNALS ═══ */}
+          {tab === "signals" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
+                <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", letterSpacing:1 }}>◎ ORACLE SIGNAL FEED</div>
+                <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                  <div style={{ width:5, height:5, borderRadius:"50%", background:BRAND.color, animation:"pulse 1.5s infinite" }} />
+                  <span style={{ fontSize:9, color:BRAND.color, fontFamily:"monospace" }}>SCANNING</span>
+                </div>
+              </div>
+              {!signals.length && <div style={{ textAlign:"center", padding:"48px", color:"#334466", fontFamily:"monospace", fontSize:12 }}><div style={{ fontSize:32, marginBottom:12 }}>🔮</div>Oracle scanning markets...</div>}
+              {signals.map(s => {
+                const tc = TYPE_CFG[s.type] || {};
+                return (
+                  <div key={s.id} className="slidein" style={{ background:"#080f1e", border:`1px solid ${s.spiked ? "#9944ff44" : s.sig.color + "33"}`, borderLeft:`3px solid ${s.spiked ? "#9944ff" : s.sig.color}`, borderRadius:8, padding:"12px 14px", marginBottom:8 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ background:s.sig.color + "20", border:`1px solid ${s.sig.color}50`, color:s.sig.color, fontSize:10, fontWeight:"bold", fontFamily:"monospace", padding:"2px 8px", borderRadius:3 }}>{s.sig.type}</span>
+                        <span style={{ fontSize:13, fontWeight:700, color:"#ddeeff" }}>{s.sym}</span>
+                        <span style={{ fontSize:9, color:tc.color + "88" }}>{tc.icon}</span>
+                        {s.spiked && <span style={{ fontSize:11, color:"#9944ff" }}>⚡</span>}
+                      </div>
+                      <span style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{s.time}</span>
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#667799" }}>
+                      <span>Price <span style={{ color:"#aabbdd", fontFamily:"monospace" }}>{s.price}</span></span>
+                      <span>RSI <span style={{ color:s.sig.color, fontFamily:"monospace" }}>{s.rsi}</span></span>
+                      <span style={{ color:"#445566" }}>{s.sig.strength}</span>
+                    </div>
+                    <div style={{ fontSize:10, color:"#334466", marginTop:4, fontFamily:"monospace" }}>🔮 {s.sig.note}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══ AI CHAT ═══ */}
+          {tab === "ai" && (
+            <div style={{ flex:1, display:"flex", flexDirection:"column", minHeight:0 }}>
+              <div style={{ padding:"8px 12px 0", display:"flex", gap:6, overflowX:"auto", scrollbarWidth:"none" }}>
+                {["Best signal now?", "Boom 1000 setup?", "EUR/USD analysis", "BTC outlook?", "Gold Fibonacci"].map((q, i) => (
+                  <button key={i} onClick={() => setAiIn(q)} style={{ background:"#0a0620", border:"1px solid #1a0a2e", borderRadius:20, color:"#6644aa", fontSize:11, padding:"5px 12px", cursor:"pointer", whiteSpace:"nowrap", fontFamily:"'Rajdhani',sans-serif", flexShrink:0 }}>{q}</button>
+                ))}
+              </div>
+              <div style={{ flex:1, overflowY:"auto", padding:"12px 12px 0" }}>
+                {msgs.map((m, i) => (
+                  <div key={i} className={i > 0 ? "slidein" : ""} style={{ marginBottom:12, display:"flex", flexDirection:m.role === "user" ? "row-reverse" : "row", gap:8, alignItems:"flex-start" }}>
+                    {m.role === "assistant" && <div className="glow" style={{ width:32, height:32, borderRadius:10, flexShrink:0, fontSize:18, background:"linear-gradient(135deg,#1a0040,#2d0060)", border:"1px solid #6622cc44", display:"flex", alignItems:"center", justifyContent:"center" }}>{BRAND.icon}</div>}
+                    <div style={{ maxWidth:"83%", background:m.role === "user" ? "#0d0520" : "#080f1e", border:`1px solid ${m.role === "user" ? "#1a0a2e" : "#0d1e32"}`, borderRadius:m.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px", padding:"10px 13px", fontSize:13, color:"#aabbd0", lineHeight:1.65, fontFamily:"'Rajdhani',sans-serif", whiteSpace:"pre-wrap" }}>{m.content}</div>
+                  </div>
+                ))}
+                {aiLoad && (
+                  <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                    <div className="glow" style={{ width:32, height:32, borderRadius:10, fontSize:18, background:"linear-gradient(135deg,#1a0040,#2d0060)", border:"1px solid #6622cc44", display:"flex", alignItems:"center", justifyContent:"center" }}>{BRAND.icon}</div>
+                    <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:"12px 12px 12px 2px", padding:"14px 18px", display:"flex", gap:5, alignItems:"center" }}>
+                      {[0, 1, 2].map(j => <div key={j} style={{ width:6, height:6, borderRadius:"50%", background:BRAND.color, animation:`pulse 1.2s ${j * .2}s infinite` }} />)}
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEnd} />
+              </div>
+              <div style={{ padding:"10px 12px 12px", background:"#060d18", borderTop:"1px solid #1a0a2e", display:"flex", gap:8 }}>
+                <input value={aiInput} onChange={e => setAiIn(e.target.value)} onKeyDown={e => e.key === "Enter" && sendAI()} placeholder="Ask the Oracle anything..."
+                  style={{ flex:1, background:"#080f1e", border:"1px solid #1a0a2e", borderRadius:8, color:"#aabbd0", padding:"10px 14px", fontSize:13, fontFamily:"'Rajdhani',sans-serif" }} />
+                <button onClick={sendAI} disabled={aiLoad || !aiInput.trim()} style={{ background:aiLoad || !aiInput.trim() ? "#0a0620" : `linear-gradient(135deg,${BRAND.color},#7722ee)`, border:`1px solid ${BRAND.color}`, borderRadius:8, color:aiLoad || !aiInput.trim() ? "#334466" : "#fff", padding:"10px 16px", fontSize:16, cursor:aiLoad || !aiInput.trim() ? "default" : "pointer", fontFamily:"monospace" }}>
+                  {aiLoad ? "…" : "▶"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ═══ SCREENER ═══ */}
+          {tab === "screener" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>🔍 Screener</div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:14 }}>Filter all instruments by signal, RSI, type, and bias</div>
+              <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+                {[{ label:"🟢 BUY signals", f:"BUY" }, { label:"🔴 SELL signals", f:"SELL" }, { label:"⚡ Synthetic", f:"SYNTHETIC" }, { label:"₿ Crypto", f:"CRYPTO" }, { label:"💱 Forex", f:"FOREX" }].map((p, i) => (
+                  <button key={i} onClick={() => setCat(p.f)} style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:20, color:"#334466", fontSize:10, padding:"5px 12px", cursor:"pointer", fontFamily:"monospace" }}>{p.label}</button>
+                ))}
+              </div>
+              {Object.entries(data).map(([sym, d]) => {
+                if (!d.candles || d.candles.length < 5) return null;
+                const rsi = computeRSI(d.candles);
+                const sig = getSignal(sym, d.candles, rsi, d.spiked);
+                const tc = TYPE_CFG[d.type] || {};
+                const up = d.changePct >= 0;
+                const rsiC = rsi <= 30 ? "#00ff88" : rsi >= 70 ? "#ff4466" : "#cc77ff";
+                return (
+                  <div key={sym} style={{ background:"#080f1e", border:`1px solid ${sig.type === "HOLD" ? "#0d1e32" : sig.color + "33"}`, borderLeft:`3px solid ${tc.color}`, borderRadius:8, padding:"12px 14px", marginBottom:8 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                      <div>
+                        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                          <span style={{ fontSize:13 }}>{tc.icon}</span>
+                          <span style={{ fontSize:14, fontWeight:700, color:"#ddeeff" }}>{sym}</span>
+                          <span style={{ fontSize:9, color:tc.color, fontFamily:"monospace", background:tc.color + "18", border:`1px solid ${tc.color}33`, borderRadius:4, padding:"1px 6px" }}>{d.type}</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:14, color:"#ddeeff", fontFamily:"'Share Tech Mono',monospace", fontWeight:700 }}>{d.price}</div>
+                        <div style={{ fontSize:10, color:up ? "#00ff88" : "#ff4466", fontFamily:"monospace" }}>{up ? "▲ +" : "▼ "}{d.changePct}%</div>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:8, color:"#334466", fontFamily:"monospace", marginBottom:3 }}>RSI {rsi}</div>
+                        <div style={{ height:3, background:"#0d1e32", borderRadius:2, overflow:"hidden" }}><div style={{ width:`${rsi}%`, height:"100%", background:rsiC, borderRadius:2 }} /></div>
+                      </div>
+                      <div style={{ background:sig.color + "18", border:`1px solid ${sig.color}44`, borderRadius:4, padding:"4px 10px", fontSize:11, color:sig.color, fontFamily:"monospace", fontWeight:"bold" }}>{sig.type}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══ NEWS ═══ */}
+          {tab === "news" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>📰 News Feed</div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:14 }}>Latest market-moving news</div>
+              {NEWS_DATA.map(item => {
+                const impCol = { HIGH:"#ff4466", MEDIUM:"#ffcc00", LOW:"#00aaff" }[item.impact];
+                const sentCol = item.sentiment.includes("BULL") ? "#00ff88" : item.sentiment.includes("BEAR") ? "#ff4466" : item.sentiment === "CAUTION" ? "#ff9944" : "#aabbdd";
+                const isExp = expNews === item.id;
+                return (
+                  <div key={item.id} className="slidein" onClick={() => setExpN(isExp ? null : item.id)} style={{ background:"#080f1e", border:`1px solid ${item.impact === "HIGH" ? "#ff446622" : "#0d1e32"}`, borderLeft:`3px solid ${impCol}`, borderRadius:8, padding:"14px", marginBottom:10, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                      <div style={{ display:"flex", gap:6 }}>
+                        <span style={{ background:impCol + "18", border:`1px solid ${impCol}44`, borderRadius:4, padding:"1px 8px", fontSize:9, color:impCol, fontFamily:"monospace" }}>{item.impact}</span>
+                        <span style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>{item.source} · {item.time}</span>
+                      </div>
+                      <span style={{ fontSize:9, color:sentCol, fontFamily:"monospace", background:sentCol + "15", border:`1px solid ${sentCol}33`, borderRadius:4, padding:"1px 8px", flexShrink:0 }}>{item.sentiment}</span>
+                    </div>
+                    <div style={{ fontSize:14, fontWeight:700, color:"#ddeeff", lineHeight:1.4, marginBottom:8 }}>{item.headline}</div>
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                      {item.tickers.map(t => <span key={t} style={{ background:"#0a0620", border:"1px solid #1a0a2e", borderRadius:4, padding:"2px 8px", fontSize:9, color:"#9944ff", fontFamily:"monospace" }}>{t}</span>)}
+                      <span style={{ fontSize:9, color:"#1e3050", fontFamily:"monospace", alignSelf:"center", marginLeft:"auto" }}>{isExp ? "▲" : "▼"}</span>
+                    </div>
+                    {isExp && <div style={{ fontSize:13, color:"#667799", lineHeight:1.7, marginTop:10, paddingTop:10, borderTop:"1px solid #0d1e32" }}>{item.summary}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══ JOURNAL ═══ */}
+          {tab === "journal" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff" }}>📓 Trade Journal</div>
+                  <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace" }}>{trades.length} trades · {winRate}% win rate</div>
+                </div>
+                <button onClick={() => setShowAdd(s => !s)} style={{ background:"linear-gradient(135deg,#6622cc,#9944ff)", border:"none", borderRadius:8, color:"#fff", padding:"9px 16px", fontSize:12, cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700 }}>+ Add</button>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:14 }}>
+                {[{ label:"Win Rate", val:`${winRate}%`, color:winRate >= 60 ? "#00ff88" : winRate >= 50 ? "#ffcc00" : "#ff4466" }, { label:"Total R", val:`${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`, color:totalR >= 0 ? "#00ff88" : "#ff4466" }, { label:"Trades", val:trades.length, color:"#aabbdd" }].map(s => (
+                  <div key={s.label} style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:8, padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontSize:18, fontWeight:900, color:s.color, fontFamily:"monospace" }}>{s.val}</div>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginTop:2 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              {showAddT && (
+                <div style={{ background:"#080f1e", border:"1px solid #9944ff33", borderRadius:10, padding:14, marginBottom:14 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#ddeeff", marginBottom:12 }}>New Trade</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                    {[{ label:"SYMBOL", field:"sym", ph:"EUR/USD" }, { label:"ENTRY", field:"entry", ph:"1.0820" }, { label:"STOP LOSS", field:"sl", ph:"1.0800" }, { label:"TAKE PROFIT", field:"tp", ph:"1.0860" }, { label:"EXIT", field:"exit", ph:"1.0858" }].map(f => (
+                      <div key={f.field}>
+                        <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>{f.label}</div>
+                        <input value={tForm[f.field]} onChange={e => setTForm(p => ({ ...p, [f.field]:e.target.value }))} placeholder={f.ph} style={S} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+                    {["BUY", "SELL"].map(s => <button key={s} onClick={() => setTForm(p => ({ ...p, side:s }))} style={{ flex:1, padding:"8px", border:`1px solid ${tForm.side === s ? (s === "BUY" ? "#00ff88" : "#ff4466") : "#0d1e32"}`, borderRadius:6, background:tForm.side === s ? (s === "BUY" ? "#00ff8815" : "#ff446615") : "#060d18", color:tForm.side === s ? (s === "BUY" ? "#00ff88" : "#ff4466") : "#334466", fontSize:12, cursor:"pointer", fontFamily:"monospace", fontWeight:"bold" }}>{s === "BUY" ? "▲ BUY" : "▼ SELL"}</button>)}
+                    {[true, false].map(w => <button key={String(w)} onClick={() => setTForm(p => ({ ...p, won:w }))} style={{ flex:1, padding:"8px", border:`1px solid ${tForm.won === w ? (w ? "#00ff88" : "#ff4466") : "#0d1e32"}`, borderRadius:6, background:tForm.won === w ? (w ? "#00ff8815" : "#ff446615") : "#060d18", color:tForm.won === w ? (w ? "#00ff88" : "#ff4466") : "#334466", fontSize:12, cursor:"pointer", fontFamily:"monospace", fontWeight:"bold" }}>{w ? "✓ WIN" : "✗ LOSS"}</button>)}
+                  </div>
+                  <button onClick={() => {
+                    const e = parseFloat(tForm.entry), s = parseFloat(tForm.sl), t = parseFloat(tForm.tp);
+                    const pR = Math.abs(e - s), pT = Math.abs(t - e);
+                    setTrades(p => [{ id:Date.now(), ...tForm, entry:e, sl:s, tp:t, exit:parseFloat(tForm.exit) || t, rr:tForm.won ? parseFloat((pT / pR).toFixed(2)) : -1, date:new Date().toISOString().split("T")[0] }, ...p]);
+                    setShowAdd(false);
+                    setTForm({ sym:"EUR/USD", side:"BUY", entry:"", sl:"", tp:"", exit:"", won:true, note:"" });
+                  }} style={{ width:"100%", background:"linear-gradient(135deg,#6622cc,#9944ff)", border:"none", borderRadius:8, color:"#fff", padding:"11px", fontSize:14, cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700 }}>Save Trade</button>
+                </div>
+              )}
+              {trades.map(t => (
+                <div key={t.id} style={{ background:"#080f1e", border:`1px solid ${t.won ? "#00ff8822" : "#ff446622"}`, borderLeft:`3px solid ${t.won ? "#00ff88" : "#ff4466"}`, borderRadius:8, padding:"12px 14px", marginBottom:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <span style={{ fontSize:14, fontWeight:700, color:"#ddeeff" }}>{t.sym}</span>
+                      <span style={{ background:t.side === "BUY" ? "#00ff8815" : "#ff446615", border:`1px solid ${t.side === "BUY" ? "#00ff8833" : "#ff446633"}`, borderRadius:4, padding:"1px 8px", fontSize:10, color:t.side === "BUY" ? "#00ff88" : "#ff4466", fontFamily:"monospace" }}>{t.side === "BUY" ? "▲" : "▼"} {t.side}</span>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:13, fontWeight:700, fontFamily:"monospace", color:t.won ? "#00ff88" : "#ff4466" }}>{t.won ? "+" : ""}{t.rr}R</div>
+                      <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace" }}>{t.date}</div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:12, fontSize:11, color:"#667799", fontFamily:"monospace" }}>
+                    <span>E <span style={{ color:"#aabbdd" }}>{t.entry}</span></span>
+                    <span>SL <span style={{ color:"#ff4466" }}>{t.sl}</span></span>
+                    <span>TP <span style={{ color:"#00ff88" }}>{t.tp}</span></span>
+                  </div>
+                  {t.note && <div style={{ fontSize:10, color:"#334466", marginTop:5, fontFamily:"monospace", fontStyle:"italic" }}>"{t.note}"</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ═══ RISK CALCULATOR ═══ */}
+          {tab === "risk" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>🎯 Risk Calculator</div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:16 }}>Calculate exact position size before every trade</div>
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>ACCOUNT</SectionTitle>
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>BALANCE (USD)</div>
+                  <input type="number" value={rBal} onChange={e => setRBal(e.target.value)} placeholder="1000" style={S} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>
+                  <span>RISK PER TRADE</span><span style={{ color:"#9944ff" }}>{rPct}% = ${rAmt.toFixed(2)}</span>
+                </div>
+                <input type="range" min="0.5" max="5" step="0.5" value={rPct} onChange={e => setRPct(e.target.value)} />
+              </Card>
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>TRADE SETUP</SectionTitle>
+                {[{ label:"ENTRY PRICE", val:rEntry, set:setREntry, ph:"1.0842" }, { label:"STOP LOSS", val:rSL, set:setRSL, ph:"1.0820" }, { label:"TAKE PROFIT", val:rTP, set:setRTP, ph:"1.0880" }].map(f => (
+                  <div key={f.label} style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>{f.label}</div>
+                    <input type="number" value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph} style={S} />
+                  </div>
+                ))}
+              </Card>
+              <Card>
+                <SectionTitle>RESULTS</SectionTitle>
+                {[{ label:"Risk Amount", val:rAmt > 0 ? `$${rAmt.toFixed(2)}` : "—", color:"#ff4466" }, { label:"Potential Profit", val:potProfit > 0 ? `$${potProfit}` : "—", color:"#00ff88" }, { label:"Lot Size", val:lotSize > 0 ? `${lotSize} lots` : "—", color:"#00aaff" }, { label:"R/R Ratio", val:rrRatio > 0 ? `1:${rrRatio}` : "—", color:rrRatio >= 2 ? "#00ff88" : rrRatio >= 1.5 ? "#ffcc00" : "#ff9944" }].map(({ label, val, color }) => (
+                  <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #06101c" }}>
+                    <span style={{ fontSize:13, color:"#667799" }}>{label}</span>
+                    <span style={{ fontSize:13, color, fontFamily:"monospace", fontWeight:"bold" }}>{val}</span>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
+
+          {/* ═══ SESSIONS ═══ */}
+          {tab === "sessions" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>🌍 Market Sessions</div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:16 }}>UTC {clock.toUTCString().slice(17, 22)} · Local {clock.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</div>
+              {SESSIONS.map(s => {
+                const open = sessionOpen(s.open, s.close);
+                return (
+                  <div key={s.name} style={{ background:open ? s.color + "10" : "#080f1e", border:`1px solid ${open ? s.color + "44" : "#0d1e32"}`, borderRadius:10, padding:"14px", marginBottom:10 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                      <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                        <span style={{ fontSize:24 }}>{s.flag}</span>
+                        <div>
+                          <div style={{ fontSize:15, fontWeight:700, color:open ? s.color : "#667799" }}>{s.name}</div>
+                          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>{s.open}:00 – {s.close}:00 UTC</div>
+                        </div>
+                      </div>
+                      <div style={{ background:open ? s.color + "22" : "#0d1e32", border:`1px solid ${open ? s.color + "55" : "#1e3050"}`, borderRadius:4, padding:"4px 12px", display:"flex", alignItems:"center", gap:5 }}>
+                        {open && <div style={{ width:5, height:5, borderRadius:"50%", background:s.color, animation:"pulse 2s infinite" }} />}
+                        <span style={{ fontSize:11, color:open ? s.color : "#334466", fontFamily:"monospace" }}>{open ? "OPEN" : "CLOSED"}</span>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {s.pairs.map(p => <span key={p} style={{ background:s.color + "15", border:`1px solid ${s.color}33`, borderRadius:4, padding:"3px 10px", fontSize:11, color:s.color, fontFamily:"monospace" }}>{p}</span>)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ═══ STATS ═══ */}
+          {tab === "stats" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>📈 Performance</div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginBottom:14 }}>Your trading statistics</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+                {[{ label:"Win Rate", val:`${winRate}%`, color:winRate >= 60 ? "#00ff88" : winRate >= 50 ? "#ffcc00" : "#ff4466", sub:`${wins}W · ${losses}L` }, { label:"Total R", val:`${totalR >= 0 ? "+" : ""}${totalR.toFixed(1)}R`, color:totalR >= 0 ? "#00ff88" : "#ff4466", sub:`${trades.length} trades` }, { label:"Avg R", val:`${trades.length ? (totalR / trades.length).toFixed(2) : 0}R`, color:"#cc77ff", sub:"Per trade" }, { label:"Best", val:`+${Math.max(...trades.map(t => t.rr))}R`, color:"#00ff88", sub:"Best trade" }].map(s => (
+                  <div key={s.label} style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:"14px 12px" }}>
+                    <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace", marginBottom:4 }}>{s.label}</div>
+                    <div style={{ fontSize:22, fontWeight:900, color:s.color, fontFamily:"monospace" }}>{s.val}</div>
+                    <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", marginTop:2 }}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+              <Card>
+                <SectionTitle>WIN / LOSS BREAKDOWN</SectionTitle>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:10, fontFamily:"monospace" }}>
+                  <span style={{ color:"#00ff88" }}>W {wins}</span>
+                  <span style={{ color:"#334466" }}>{winRate}% win rate</span>
+                  <span style={{ color:"#ff4466" }}>L {losses}</span>
+                </div>
+                <div style={{ height:8, background:"#0d1e32", borderRadius:4, overflow:"hidden" }}>
+                  <div style={{ width:`${winRate}%`, height:"100%", background:"linear-gradient(90deg,#00ff88,#44cc88)", borderRadius:4, transition:"width 0.5s" }} />
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* ═══ SETTINGS ═══ */}
+          {tab === "settings" && (
+            <div style={{ overflowY:"auto", padding:12 }}>
+              <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:16 }}>⚙ Settings</div>
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>SIGNAL THRESHOLDS</SectionTitle>
+                {[{ label:"RSI Oversold Level", key:"rsiLow" }, { label:"RSI Overbought Level", key:"rsiHigh" }].map(f => (
+                  <div key={f.key} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:"1px solid #06101c" }}>
+                    <span style={{ fontSize:13, color:"#aabbdd", fontWeight:600 }}>{f.label}</span>
+                    <input type="number" value={settings[f.key]} onChange={e => setSettings(p => ({ ...p, [f.key]:parseInt(e.target.value) || 0 }))} style={{ ...S, width:80, padding:"6px 10px" }} />
+                  </div>
+                ))}
+              </Card>
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>CHART</SectionTitle>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0" }}>
+                  <span style={{ fontSize:13, color:"#aabbdd", fontWeight:600 }}>Default Timeframe</span>
+                  <select value={settings.tf} onChange={e => setSettings(p => ({ ...p, tf:e.target.value }))} style={{ ...S, width:100, padding:"6px 10px" }}>
+                    {["1m", "5m", "15m", "1h", "4h", "1d"].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              </Card>
+              <Card style={{ marginBottom:12 }}>
+                <SectionTitle>NOTIFICATIONS</SectionTitle>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0" }}>
+                  <div>
+                    <div style={{ fontSize:13, color:"#aabbdd", fontWeight:600 }}>Push Notifications</div>
+                    <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>Alerts on this device</div>
+                  </div>
+                  <div onClick={() => setSettings(p => ({ ...p, push:!p.push }))} style={{ width:44, height:24, borderRadius:12, cursor:"pointer", background:settings.push ? "#9944ff" : "#0d1e32", border:`1px solid ${settings.push ? "#9944ff" : "#1e3050"}`, position:"relative", transition:"all 0.3s" }}>
+                    <div style={{ width:18, height:18, borderRadius:"50%", background:settings.push ? "#fff" : "#334466", position:"absolute", top:2, left:settings.push ? 22 : 2, transition:"left 0.3s" }} />
+                  </div>
+                </div>
+              </Card>
+              <div style={{ background:"#080f1e", border:"1px solid #0d1e32", borderRadius:10, padding:20, textAlign:"center" }}>
+                <div style={{ fontSize:56, marginBottom:8 }}>🔮</div>
+                <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:16, color:BRAND.color, letterSpacing:3 }}>{BRAND.name}</div>
+                <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace", marginTop:4 }}>v1.0 · All-Seeing Intelligence</div>
+                <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace", marginTop:12 }}>⚠ NOT FINANCIAL ADVICE</div>
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* ── FOOTER ── */}
+        <div style={{ borderTop:"1px solid #1a0a2e", padding:"7px 16px", display:"flex", justifyContent:"space-between", fontSize:9, color:"#1e3050", fontFamily:"monospace" }}>
+          <span>{BRAND.icon} {BRAND.name} v1.0</span>
+          <span style={{ color:isLive ? "#00ff8844" : "#ffcc0044" }}>{isLive ? "REAL DATA" : "SIMULATED"}</span>
+          <span>{clock.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
+        </div>
+      </div>
+    </>
+  );
+}

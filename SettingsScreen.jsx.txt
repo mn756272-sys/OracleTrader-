@@ -1,0 +1,384 @@
+import { useState } from "react";
+
+const SECTIONS = ["Account","Trading","Notifications","Display","About"];
+
+export default function SettingsScreen({ onLogout }) {
+  const [section, setSection] = useState("Account");
+  const [settings, setSettings] = useState({
+    name: "Mthokozisi",
+    email: "user@smonkie.com",
+    balance: "1000",
+    riskPct: "1",
+    defaultTF: "1h",
+    rsiOversold: "30",
+    rsiOverbought: "70",
+    pushNotif: true,
+    telegramAlerts: false,
+    emailAlerts: false,
+    telegramId: "",
+    soundAlerts: true,
+    quietFrom: "22:00",
+    quietTo: "06:00",
+    theme: "dark",
+    priceDecimals: "4",
+    showVolume: true,
+    showATR: true,
+    autoRefresh: "30",
+    language: "English",
+  });
+
+  function update(key, val) {
+    setSettings(p => ({ ...p, [key]: val }));
+  }
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input,select{outline:none;transition:border-color 0.2s}
+    input:focus,select:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+    select option{background:#080f1e}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+  `;
+
+  const inputStyle = {
+    width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+    borderRadius:8, color:"#aabbd0", padding:"10px 12px",
+    fontSize:13, fontFamily:"monospace",
+  };
+
+  const selectStyle = { ...inputStyle };
+
+  function Toggle({ val, onChange }) {
+    return (
+      <div onClick={() => onChange(!val)} style={{
+        width:44, height:24, borderRadius:12, cursor:"pointer",
+        background: val ? "#0044aa" : "#0d1e32",
+        border: `1px solid ${val ? "#0066cc" : "#1e3050"}`,
+        position:"relative", transition:"all 0.3s", flexShrink:0,
+      }}>
+        <div style={{
+          width:18, height:18, borderRadius:"50%",
+          background: val ? "#fff" : "#334466",
+          position:"absolute", top:2,
+          left: val ? 22 : 2,
+          transition:"left 0.3s",
+        }}/>
+      </div>
+    );
+  }
+
+  function Field({ label, children, sub }) {
+    return (
+      <div style={{ padding:"12px 0", borderBottom:"1px solid #06101c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+          <div>
+            <div style={{ fontSize:13, color:"#aabbdd", fontWeight:600 }}>{label}</div>
+            {sub && <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace", marginTop:2 }}>{sub}</div>}
+          </div>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  function SectionCard({ title, children }) {
+    return (
+      <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+        borderRadius:10, padding:"0 14px", marginBottom:14 }}>
+        <div style={{ fontSize:9, color:"#334466", fontFamily:"monospace",
+          letterSpacing:1, padding:"10px 0 0" }}>{title}</div>
+        {children}
+        <div style={{ height:4 }}/>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        {/* Header */}
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12,
+          color:"#00aaff", letterSpacing:2, marginBottom:4 }}>SMONKIE TRADER</div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:20 }}>⚙ Settings</div>
+
+        {/* Section tabs */}
+        <div style={{ display:"flex", gap:6, marginBottom:20, overflowX:"auto", scrollbarWidth:"none" }}>
+          {SECTIONS.map(s => (
+            <button key={s} onClick={() => setSection(s)} style={{
+              background: section===s ? "#0044aa22" : "#080f1e",
+              border: `1px solid ${section===s ? "#0044aa" : "#0d1e32"}`,
+              borderRadius:20, color: section===s ? "#00aaff" : "#334466",
+              fontSize:11, padding:"5px 14px", cursor:"pointer",
+              fontFamily:"monospace", whiteSpace:"nowrap", flexShrink:0,
+              transition:"all 0.2s",
+            }}>{s}</button>
+          ))}
+        </div>
+
+        <div className="fadein" key={section}>
+
+          {/* ACCOUNT */}
+          {section==="Account" && (
+            <>
+              <div style={{ display:"flex", alignItems:"center", gap:14,
+                background:"#080f1e", border:"1px solid #0d1e32",
+                borderRadius:12, padding:16, marginBottom:14 }}>
+                <div style={{ width:52, height:52, borderRadius:"50%",
+                  background:"linear-gradient(135deg,#001840,#002860)",
+                  border:"2px solid #0044aa",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:26 }}>🐒</div>
+                <div>
+                  <div style={{ fontSize:16, fontWeight:700, color:"#ddeeff" }}>{settings.name}</div>
+                  <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace" }}>{settings.email}</div>
+                  <div style={{ fontSize:10, color:"#00aaff", fontFamily:"monospace",
+                    marginTop:4, background:"#0044aa22", border:"1px solid #0044aa44",
+                    borderRadius:4, padding:"1px 8px", display:"inline-block" }}>PRO PLAN</div>
+                </div>
+              </div>
+
+              <SectionCard title="PROFILE">
+                <Field label="Display Name">
+                  <input value={settings.name} onChange={e => update("name", e.target.value)}
+                    style={{ ...inputStyle, width:160 }}/>
+                </Field>
+                <Field label="Email">
+                  <input value={settings.email} onChange={e => update("email", e.target.value)}
+                    style={{ ...inputStyle, width:160 }} type="email"/>
+                </Field>
+              </SectionCard>
+
+              <SectionCard title="TRADING ACCOUNT">
+                <Field label="Account Balance (USD)" sub="Used for position sizing">
+                  <input value={settings.balance} onChange={e => update("balance", e.target.value)}
+                    type="number" style={{ ...inputStyle, width:120 }}/>
+                </Field>
+              </SectionCard>
+
+              <button onClick={onLogout} style={{
+                width:"100%", background:"#1a0808", border:"1px solid #441111",
+                borderRadius:10, color:"#ff4466", padding:"13px", fontSize:14,
+                cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+                marginBottom:8,
+              }}>Sign Out</button>
+
+              <button style={{
+                width:"100%", background:"none", border:"1px solid #0d1e32",
+                borderRadius:10, color:"#334466", padding:"11px", fontSize:13,
+                cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:600,
+              }}>Delete Account</button>
+            </>
+          )}
+
+          {/* TRADING */}
+          {section==="Trading" && (
+            <>
+              <SectionCard title="RISK MANAGEMENT">
+                <Field label="Risk Per Trade" sub={`${settings.riskPct}% = $${(parseFloat(settings.balance||1000)*parseFloat(settings.riskPct)/100).toFixed(2)}`}>
+                  <input type="range" min="0.5" max="5" step="0.5"
+                    value={settings.riskPct}
+                    onChange={e => update("riskPct", e.target.value)}
+                    style={{ width:120, accentColor:"#00aaff" }}/>
+                </Field>
+              </SectionCard>
+
+              <SectionCard title="CHART DEFAULTS">
+                <Field label="Default Timeframe">
+                  <select value={settings.defaultTF} onChange={e => update("defaultTF", e.target.value)}
+                    style={{ ...selectStyle, width:100 }}>
+                    {["1m","5m","15m","1h","4h","1d"].map(t =>
+                      <option key={t} value={t}>{t}</option>
+                    )}
+                  </select>
+                </Field>
+                <Field label="Show Volume" sub="Display volume bars on chart">
+                  <Toggle val={settings.showVolume} onChange={v => update("showVolume", v)}/>
+                </Field>
+                <Field label="Show ATR" sub="Show ATR value on chart">
+                  <Toggle val={settings.showATR} onChange={v => update("showATR", v)}/>
+                </Field>
+              </SectionCard>
+
+              <SectionCard title="SIGNAL THRESHOLDS">
+                <Field label="RSI Oversold Level">
+                  <input type="number" value={settings.rsiOversold}
+                    onChange={e => update("rsiOversold", e.target.value)}
+                    style={{ ...inputStyle, width:80 }}/>
+                </Field>
+                <Field label="RSI Overbought Level">
+                  <input type="number" value={settings.rsiOverbought}
+                    onChange={e => update("rsiOverbought", e.target.value)}
+                    style={{ ...inputStyle, width:80 }}/>
+                </Field>
+                <Field label="Data Refresh Rate" sub="Seconds between price updates">
+                  <select value={settings.autoRefresh} onChange={e => update("autoRefresh", e.target.value)}
+                    style={{ ...selectStyle, width:100 }}>
+                    {["15","30","60","120"].map(t =>
+                      <option key={t} value={t}>{t}s</option>
+                    )}
+                  </select>
+                </Field>
+              </SectionCard>
+            </>
+          )}
+
+          {/* NOTIFICATIONS */}
+          {section==="Notifications" && (
+            <>
+              <SectionCard title="CHANNELS">
+                <Field label="Push Notifications" sub="Alerts on this device">
+                  <Toggle val={settings.pushNotif} onChange={v => update("pushNotif", v)}/>
+                </Field>
+                <Field label="Telegram Alerts" sub="Send signals to Telegram">
+                  <Toggle val={settings.telegramAlerts} onChange={v => update("telegramAlerts", v)}/>
+                </Field>
+                <Field label="Email Alerts" sub="Elite plan only">
+                  <Toggle val={settings.emailAlerts} onChange={v => update("emailAlerts", v)}/>
+                </Field>
+                <Field label="Sound Alerts">
+                  <Toggle val={settings.soundAlerts} onChange={v => update("soundAlerts", v)}/>
+                </Field>
+              </SectionCard>
+
+              {settings.telegramAlerts && (
+                <SectionCard title="TELEGRAM SETUP">
+                  <Field label="Your Chat ID" sub="Get from @SmonkieAlertBot">
+                    <input value={settings.telegramId}
+                      onChange={e => update("telegramId", e.target.value)}
+                      placeholder="123456789"
+                      style={{ ...inputStyle, width:140 }}/>
+                  </Field>
+                </SectionCard>
+              )}
+
+              <SectionCard title="QUIET HOURS">
+                <Field label="From">
+                  <input type="time" value={settings.quietFrom}
+                    onChange={e => update("quietFrom", e.target.value)}
+                    style={{ ...inputStyle, width:110 }}/>
+                </Field>
+                <Field label="To">
+                  <input type="time" value={settings.quietTo}
+                    onChange={e => update("quietTo", e.target.value)}
+                    style={{ ...inputStyle, width:110 }}/>
+                </Field>
+              </SectionCard>
+            </>
+          )}
+
+          {/* DISPLAY */}
+          {section==="Display" && (
+            <>
+              <SectionCard title="APPEARANCE">
+                <Field label="Theme">
+                  <div style={{ display:"flex", gap:6 }}>
+                    {["dark","darker"].map(t => (
+                      <button key={t} onClick={() => update("theme", t)} style={{
+                        background: settings.theme===t ? "#0044aa22" : "#060d18",
+                        border: `1px solid ${settings.theme===t ? "#0044aa" : "#0d1e32"}`,
+                        borderRadius:6, color: settings.theme===t ? "#00aaff" : "#334466",
+                        padding:"5px 12px", fontSize:11, cursor:"pointer", fontFamily:"monospace",
+                      }}>{t}</button>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Language">
+                  <select value={settings.language} onChange={e => update("language", e.target.value)}
+                    style={{ ...selectStyle, width:130 }}>
+                    {["English","French","Portuguese"].map(l =>
+                      <option key={l} value={l}>{l}</option>
+                    )}
+                  </select>
+                </Field>
+              </SectionCard>
+
+              <SectionCard title="PRICE FORMAT">
+                <Field label="Decimal Places" sub="For forex pairs">
+                  <select value={settings.priceDecimals}
+                    onChange={e => update("priceDecimals", e.target.value)}
+                    style={{ ...selectStyle, width:80 }}>
+                    {["2","3","4","5"].map(d =>
+                      <option key={d} value={d}>{d}</option>
+                    )}
+                  </select>
+                </Field>
+              </SectionCard>
+            </>
+          )}
+
+          {/* ABOUT */}
+          {section==="About" && (
+            <>
+              <div style={{ textAlign:"center", padding:"28px 0 20px" }}>
+                <div style={{ fontSize:56, marginBottom:12 }}>🐒</div>
+                <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:16,
+                  color:"#00aaff", letterSpacing:3, marginBottom:4 }}>SMONKIE TRADER</div>
+                <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace" }}>Version 3.0 PRO</div>
+              </div>
+
+              <SectionCard title="APP INFO">
+                {[
+                  { label:"Version", val:"3.0.0" },
+                  { label:"Build", val:"2025.05" },
+                  { label:"Data Sources", val:"Yahoo + Deriv" },
+                  { label:"AI Model", val:"Claude Sonnet 4" },
+                ].map(({label,val}) => (
+                  <Field key={label} label={label}>
+                    <span style={{ fontSize:12, color:"#334466", fontFamily:"monospace" }}>{val}</span>
+                  </Field>
+                ))}
+              </SectionCard>
+
+              <SectionCard title="LEGAL">
+                {["Privacy Policy","Terms of Service","Risk Disclaimer","Cookie Policy"].map(l => (
+                  <Field key={l} label={l}>
+                    <span style={{ color:"#00aaff", fontSize:13 }}>→</span>
+                  </Field>
+                ))}
+              </SectionCard>
+
+              <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+                borderRadius:10, padding:14, marginBottom:14 }}>
+                <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace",
+                  letterSpacing:1, marginBottom:8 }}>SUPPORT</div>
+                <div style={{ fontSize:13, color:"#667799", marginBottom:12 }}>
+                  Having issues? Contact our support team.
+                </div>
+                <button style={{
+                  width:"100%", background:"none", border:"1px solid #0044aa44",
+                  borderRadius:8, color:"#00aaff", padding:"11px", fontSize:13,
+                  cursor:"pointer", fontFamily:"'Rajdhani',sans-serif", fontWeight:600,
+                }}>✈ Contact Support on Telegram</button>
+              </div>
+
+              <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+                textAlign:"center", lineHeight:1.8 }}>
+                ⚠ NOT FINANCIAL ADVICE<br/>
+                © 2025 SMONKIE TRADER · All rights reserved
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Save button */}
+        {section !== "About" && (
+          <div style={{ position:"sticky", bottom:16, marginTop:20 }}>
+            <button style={{
+              width:"100%", background:"linear-gradient(135deg,#0044aa,#0066cc)",
+              border:"none", borderRadius:10, color:"#fff",
+              padding:"14px", fontSize:15, cursor:"pointer",
+              fontFamily:"'Rajdhani',sans-serif", fontWeight:700,
+              boxShadow:"0 4px 20px #00224488",
+            }}>Save Settings</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,205 @@
+import { useState } from "react";
+
+export default function RiskCalculator() {
+  const [balance, setBalance] = useState("1000");
+  const [risk, setRisk] = useState("1");
+  const [entry, setEntry] = useState("");
+  const [sl, setSl] = useState("");
+  const [tp, setTp] = useState("");
+  const [instrument, setInstrument] = useState("EUR/USD");
+  const [side, setSide] = useState("BUY");
+
+  const bal = parseFloat(balance)||0;
+  const riskPct = parseFloat(risk)||1;
+  const entryP = parseFloat(entry)||0;
+  const slP = parseFloat(sl)||0;
+  const tpP = parseFloat(tp)||0;
+
+  const riskAmount = bal * riskPct / 100;
+  const pipRisk = entryP && slP ? Math.abs(entryP - slP) : 0;
+  const pipTarget = entryP && tpP ? Math.abs(tpP - entryP) : 0;
+  const rr = pipRisk > 0 ? (pipTarget / pipRisk).toFixed(2) : 0;
+  const potentialProfit = pipRisk > 0 && pipTarget > 0
+    ? (riskAmount * (pipTarget / pipRisk)).toFixed(2) : 0;
+  const lotSize = pipRisk > 0 ? (riskAmount / (pipRisk * 100)).toFixed(2) : 0;
+
+  const rrColor = rr >= 2 ? "#00ff88" : rr >= 1.5 ? "#ffcc00" : rr > 0 ? "#ff9944" : "#334466";
+  const rrLabel = rr >= 2 ? "EXCELLENT" : rr >= 1.5 ? "GOOD" : rr >= 1 ? "ACCEPTABLE" : rr > 0 ? "POOR" : "—";
+
+  const INSTRUMENTS = ["EUR/USD","GBP/USD","USD/ZAR","XAU/USD","Boom 1000","Crash 1000","SPY","BTC/USD"];
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input{outline:none;transition:border-color 0.2s}
+    input:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+    input[type=range]{accent-color:#00aaff}
+  `;
+
+  function Field({ label, value, onChange, placeholder, prefix }) {
+    return (
+      <div style={{ marginBottom:14 }}>
+        <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+          letterSpacing:1, marginBottom:5 }}>{label}</div>
+        <div style={{ position:"relative" }}>
+          {prefix && <span style={{ position:"absolute", left:12, top:"50%",
+            transform:"translateY(-50%)", color:"#334466",
+            fontFamily:"monospace", fontSize:13 }}>{prefix}</span>}
+          <input value={value} onChange={e=>onChange(e.target.value)}
+            type="number" placeholder={placeholder}
+            style={{ width:"100%", background:"#060d18", border:"1px solid #0d1e32",
+              borderRadius:8, color:"#aabbd0", padding:`12px ${prefix?"12px":"14px"} 12px ${prefix?"28px":"14px"}`,
+              fontSize:14, fontFamily:"monospace" }}/>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", padding:"20px 16px",
+        maxWidth:480, margin:"0 auto" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:13,
+          color:"#00aaff", letterSpacing:2, marginBottom:4 }}>RISK CALCULATOR</div>
+        <div style={{ fontSize:24, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>🎯 Position Sizer</div>
+        <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:24 }}>
+          Calculate your lot size before every trade
+        </div>
+
+        {/* Account settings */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:16, marginBottom:16 }}>
+          <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:14 }}>ACCOUNT SETTINGS</div>
+          <Field label="ACCOUNT BALANCE (USD)" value={balance} onChange={setBalance}
+            placeholder="1000" prefix="$"/>
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between",
+              fontSize:10, color:"#334466", fontFamily:"monospace", marginBottom:6 }}>
+              <span>RISK PER TRADE</span>
+              <span style={{ color:"#00aaff" }}>{risk}% = ${riskAmount.toFixed(2)}</span>
+            </div>
+            <input type="range" min="0.5" max="5" step="0.5" value={risk}
+              onChange={e=>setRisk(e.target.value)} style={{ width:"100%" }}/>
+            <div style={{ display:"flex", justifyContent:"space-between",
+              fontSize:9, color:"#1e3050", fontFamily:"monospace", marginTop:3 }}>
+              <span>0.5% Safe</span><span>2% Standard</span><span>5% Aggressive</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Trade setup */}
+        <div style={{ background:"#080f1e", border:"1px solid #0d1e32",
+          borderRadius:10, padding:16, marginBottom:16 }}>
+          <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:14 }}>TRADE SETUP</div>
+
+          {/* Instrument */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+              letterSpacing:1, marginBottom:5 }}>INSTRUMENT</div>
+            <div style={{ display:"flex", gap:6, overflowX:"auto", scrollbarWidth:"none" }}>
+              {INSTRUMENTS.map(i => (
+                <button key={i} onClick={()=>setInstrument(i)} style={{
+                  background: instrument===i?"#0044aa22":"#060d18",
+                  border:`1px solid ${instrument===i?"#0044aa":"#0d1e32"}`,
+                  borderRadius:6, color: instrument===i?"#00aaff":"#334466",
+                  padding:"5px 10px", fontSize:10, cursor:"pointer",
+                  fontFamily:"monospace", whiteSpace:"nowrap", flexShrink:0,
+                }}>{i}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Side */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+              letterSpacing:1, marginBottom:5 }}>DIRECTION</div>
+            <div style={{ display:"flex", gap:8 }}>
+              {["BUY","SELL"].map(s => (
+                <button key={s} onClick={()=>setSide(s)} style={{
+                  flex:1, padding:"10px",
+                  background: side===s ? (s==="BUY"?"#00ff8822":"#ff446622") : "#060d18",
+                  border:`1px solid ${side===s?(s==="BUY"?"#00ff8866":"#ff446666"):"#0d1e32"}`,
+                  borderRadius:8, color: side===s?(s==="BUY"?"#00ff88":"#ff4466"):"#334466",
+                  fontSize:14, cursor:"pointer", fontFamily:"monospace",
+                  fontWeight:"bold", transition:"all 0.2s",
+                }}>
+                  {s==="BUY"?"▲ BUY":"▼ SELL"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Field label="ENTRY PRICE" value={entry} onChange={setEntry} placeholder="1.0842"/>
+          <Field label="STOP LOSS" value={sl} onChange={setSl} placeholder="1.0820"/>
+          <Field label="TAKE PROFIT" value={tp} onChange={setTp} placeholder="1.0880"/>
+        </div>
+
+        {/* Results */}
+        <div style={{ background:"#080f1e", border:`1px solid ${entryP&&slP?"#0044aa44":"#0d1e32"}`,
+          borderRadius:10, padding:16, marginBottom:16 }}>
+          <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:14 }}>CALCULATION RESULTS</div>
+
+          {[
+            { label:"Risk Amount", val: riskAmount>0?`$${riskAmount.toFixed(2)}`:"—", color:"#ff4466" },
+            { label:"Potential Profit", val: potentialProfit>0?`$${potentialProfit}`:"—", color:"#00ff88" },
+            { label:"Lot Size", val: lotSize>0?`${lotSize} lots`:"—", color:"#00aaff" },
+            { label:"Pip Risk", val: pipRisk>0?pipRisk.toFixed(5):"—", color:"#aabbdd" },
+            { label:"Pip Target", val: pipTarget>0?pipTarget.toFixed(5):"—", color:"#aabbdd" },
+          ].map(({label,val,color})=>(
+            <div key={label} style={{ display:"flex", justifyContent:"space-between",
+              padding:"8px 0", borderBottom:"1px solid #060d18" }}>
+              <span style={{ fontSize:13, color:"#667799" }}>{label}</span>
+              <span style={{ fontSize:13, color, fontFamily:"monospace", fontWeight:"bold" }}>{val}</span>
+            </div>
+          ))}
+
+          {/* R:R ratio */}
+          <div style={{ marginTop:14, background:rrColor+"12",
+            border:`1px solid ${rrColor}33`, borderRadius:8, padding:"12px 14px",
+            display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize:11, color:"#334466", fontFamily:"monospace" }}>RISK/REWARD RATIO</div>
+              <div style={{ fontSize:11, color:rrColor, fontFamily:"monospace", marginTop:2 }}>{rrLabel}</div>
+            </div>
+            <div style={{ fontSize:28, fontWeight:900, color:rrColor, fontFamily:"monospace" }}>
+              1:{rr}
+            </div>
+          </div>
+        </div>
+
+        {/* Rules */}
+        <div style={{ background:"#060d18", border:"1px solid #0d1e32",
+          borderRadius:10, padding:14 }}>
+          <div style={{ fontSize:10, color:"#334466", fontFamily:"monospace",
+            letterSpacing:1, marginBottom:10 }}>GOLDEN RULES</div>
+          {[
+            "Never risk more than 2% per trade",
+            "Minimum 1:1.5 risk/reward ratio",
+            "Max 3 trades open at one time",
+            "Stop after 3 losses in one day",
+            "Always use a stop loss — no exceptions",
+          ].map((r,i)=>(
+            <div key={i} style={{ display:"flex", gap:10, padding:"6px 0",
+              borderBottom:i<4?"1px solid #06101c":"none" }}>
+              <span style={{ color:"#00aaff", flexShrink:0 }}>→</span>
+              <span style={{ fontSize:12, color:"#667799" }}>{r}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace",
+          textAlign:"center", marginTop:16 }}>
+          ⚠ NOT FINANCIAL ADVICE · Always manage your risk
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,198 @@
+import { useState } from "react";
+
+const EVENTS = [
+  { id:1, time:"08:30", currency:"USD", impact:"HIGH", title:"Non-Farm Payrolls", forecast:"185K", previous:"175K", actual:"", date:"today" },
+  { id:2, time:"10:00", currency:"EUR", impact:"HIGH", title:"ECB Interest Rate Decision", forecast:"4.50%", previous:"4.50%", actual:"", date:"today" },
+  { id:3, time:"13:30", currency:"GBP", impact:"MEDIUM", title:"UK GDP Growth Rate", forecast:"0.2%", previous:"0.1%", actual:"", date:"today" },
+  { id:4, time:"15:00", currency:"USD", impact:"LOW", title:"Consumer Confidence Index", forecast:"101.5", previous:"100.3", actual:"", date:"today" },
+  { id:5, time:"00:30", currency:"AUD", impact:"HIGH", title:"RBA Rate Decision", forecast:"4.35%", previous:"4.35%", actual:"4.35%", date:"today" },
+  { id:6, time:"08:00", currency:"EUR", impact:"MEDIUM", title:"German Industrial Production", forecast:"-0.3%", previous:"-0.5%", actual:"-0.2%", date:"today" },
+  { id:7, time:"08:30", currency:"USD", impact:"HIGH", title:"CPI Inflation Rate", forecast:"3.1%", previous:"3.2%", actual:"", date:"tomorrow" },
+  { id:8, time:"12:00", currency:"GBP", impact:"HIGH", title:"BOE Interest Rate Decision", forecast:"5.00%", previous:"5.25%", actual:"", date:"tomorrow" },
+  { id:9, time:"14:00", currency:"USD", impact:"HIGH", title:"FOMC Meeting Minutes", forecast:"", previous:"", actual:"", date:"tomorrow" },
+  { id:10, time:"10:00", currency:"EUR", impact:"MEDIUM", title:"Eurozone PMI Composite", forecast:"50.2", previous:"49.8", actual:"", date:"thursday" },
+];
+
+const IMPACT_COLOR = { HIGH:"#ff4466", MEDIUM:"#ffcc00", LOW:"#00aaff" };
+const FLAG = { USD:"🇺🇸", EUR:"🇪🇺", GBP:"🇬🇧", AUD:"🇦🇺", JPY:"🇯🇵", ZAR:"🇿🇦", CAD:"🇨🇦", CHF:"🇨🇭" };
+
+export default function EconomicCalendar() {
+  const [filter, setFilter] = useState("ALL");
+  const [dayFilter, setDayFilter] = useState("today");
+  const [search, setSearch] = useState("");
+
+  const filtered = EVENTS.filter(e => {
+    const impactMatch = filter==="ALL" || e.impact===filter;
+    const dayMatch = dayFilter==="ALL" || e.date===dayFilter;
+    const searchMatch = !search || e.title.toLowerCase().includes(search.toLowerCase()) || e.currency.includes(search.toUpperCase());
+    return impactMatch && dayMatch && searchMatch;
+  });
+
+  const highImpactToday = EVENTS.filter(e=>e.impact==="HIGH"&&e.date==="today"&&!e.actual);
+
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input{outline:none;transition:border-color 0.2s}
+    input:focus{border-color:#0055bb !important}
+    input::placeholder{color:#233344}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Rajdhani',sans-serif", background:"#060d18",
+        minHeight:"100vh", color:"#c8d8f0", maxWidth:480, margin:"0 auto", padding:"20px 16px" }}>
+
+        <div style={{ fontFamily:"'Share Tech Mono',monospace", fontSize:12, color:"#00aaff", letterSpacing:2, marginBottom:4 }}>
+          SMONKIE TRADER
+        </div>
+        <div style={{ fontSize:22, fontWeight:900, color:"#ddeeff", marginBottom:4 }}>📅 Economic Calendar</div>
+        <div style={{ fontSize:12, color:"#334466", fontFamily:"monospace", marginBottom:16 }}>
+          High impact events that move markets
+        </div>
+
+        {/* High impact warning */}
+        {highImpactToday.length > 0 && (
+          <div style={{ background:"#1a0808", border:"1px solid #ff446633",
+            borderRadius:8, padding:"12px 14px", marginBottom:16 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:"#ff4466",
+                animation:"pulse 1s infinite", flexShrink:0 }}/>
+              <div style={{ fontSize:12, color:"#ff4466", fontFamily:"monospace", fontWeight:"bold" }}>
+                {highImpactToday.length} HIGH IMPACT EVENT{highImpactToday.length>1?"S":""} TODAY
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:"#664444", marginTop:6, lineHeight:1.6 }}>
+              Trade with caution. High volatility expected around event times.
+            </div>
+            {highImpactToday.map(e=>(
+              <div key={e.id} style={{ fontSize:11, color:"#ff6644", fontFamily:"monospace", marginTop:4 }}>
+                → {e.time} {FLAG[e.currency]||"🌍"} {e.title}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Search */}
+        <div style={{ position:"relative", marginBottom:12 }}>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="Search events or currency..."
+            style={{ width:"100%", background:"#080f1e", border:"1px solid #0d1e32",
+              borderRadius:8, color:"#aabbd0", padding:"10px 14px 10px 36px",
+              fontSize:13, fontFamily:"'Rajdhani',sans-serif" }}/>
+          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)",
+            color:"#334466", fontSize:14 }}>🔍</span>
+        </div>
+
+        {/* Day filter */}
+        <div style={{ display:"flex", gap:6, marginBottom:10, overflowX:"auto", scrollbarWidth:"none" }}>
+          {["today","tomorrow","thursday","ALL"].map(d=>(
+            <button key={d} onClick={()=>setDayFilter(d)} style={{
+              background:dayFilter===d?"#0044aa22":"#080f1e",
+              border:`1px solid ${dayFilter===d?"#0044aa":"#0d1e32"}`,
+              borderRadius:20, color:dayFilter===d?"#00aaff":"#334466",
+              fontSize:10, padding:"5px 12px", cursor:"pointer",
+              fontFamily:"monospace", whiteSpace:"nowrap", flexShrink:0, transition:"all 0.2s",
+            }}>{d.toUpperCase()}</button>
+          ))}
+        </div>
+
+        {/* Impact filter */}
+        <div style={{ display:"flex", gap:6, marginBottom:16 }}>
+          {["ALL","HIGH","MEDIUM","LOW"].map(i=>{
+            const col = i==="ALL"?"#aabbdd":IMPACT_COLOR[i];
+            return(
+              <button key={i} onClick={()=>setFilter(i)} style={{
+                background:filter===i?col+"22":"#080f1e",
+                border:`1px solid ${filter===i?col+"66":"#0d1e32"}`,
+                borderRadius:20, color:filter===i?col:"#334466",
+                fontSize:10, padding:"5px 12px", cursor:"pointer",
+                fontFamily:"monospace", transition:"all 0.2s",
+              }}>{i}</button>
+            );
+          })}
+          <span style={{ marginLeft:"auto", fontSize:10, color:"#334466",
+            fontFamily:"monospace", alignSelf:"center" }}>{filtered.length} events</span>
+        </div>
+
+        {/* Event list */}
+        {filtered.length===0 && (
+          <div style={{ textAlign:"center", padding:"48px 20px", color:"#334466", fontFamily:"monospace", fontSize:12 }}>
+            <div style={{ fontSize:32, marginBottom:12 }}>📅</div>
+            No events found.
+          </div>
+        )}
+        {filtered.map(e=>{
+          const impCol = IMPACT_COLOR[e.impact];
+          const hasFired = !!e.actual;
+          const actualVsForecast = hasFired && e.forecast
+            ? (parseFloat(e.actual) > parseFloat(e.forecast) ? "BEAT" : parseFloat(e.actual) < parseFloat(e.forecast) ? "MISS" : "INLINE")
+            : null;
+          return(
+            <div key={e.id} style={{
+              background:"#080f1e",
+              border:`1px solid ${hasFired?"#0d1e32":e.impact==="HIGH"?"#ff446622":"#0d1e32"}`,
+              borderLeft:`3px solid ${impCol}`,
+              borderRadius:8, padding:"12px 14px", marginBottom:8,
+              opacity:hasFired?0.7:1,
+            }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ fontFamily:"monospace", fontSize:13, color:"#aabbdd" }}>{e.time}</span>
+                  <span style={{ fontSize:16 }}>{FLAG[e.currency]||"🌍"}</span>
+                  <span style={{ fontSize:11, color:"#667799", fontFamily:"monospace" }}>{e.currency}</span>
+                  <span style={{
+                    background:impCol+"15", border:`1px solid ${impCol}44`,
+                    borderRadius:4, padding:"1px 7px", fontSize:9,
+                    color:impCol, fontFamily:"monospace",
+                  }}>{e.impact}</span>
+                </div>
+                <span style={{ fontSize:10, color:"#334466", fontFamily:"monospace" }}>
+                  {e.date==="today"?"TODAY":e.date==="tomorrow"?"TMR":e.date.toUpperCase()}
+                </span>
+              </div>
+              <div style={{ fontSize:14, fontWeight:700, color:"#ddeeff", marginBottom:8 }}>{e.title}</div>
+              <div style={{ display:"flex", gap:16, fontSize:11, fontFamily:"monospace" }}>
+                <div>
+                  <span style={{ color:"#334466" }}>Forecast </span>
+                  <span style={{ color:"#aabbdd" }}>{e.forecast||"—"}</span>
+                </div>
+                <div>
+                  <span style={{ color:"#334466" }}>Previous </span>
+                  <span style={{ color:"#aabbdd" }}>{e.previous||"—"}</span>
+                </div>
+                {hasFired && (
+                  <div>
+                    <span style={{ color:"#334466" }}>Actual </span>
+                    <span style={{
+                      color:actualVsForecast==="BEAT"?"#00ff88":actualVsForecast==="MISS"?"#ff4466":"#ffcc00",
+                      fontWeight:"bold",
+                    }}>{e.actual}</span>
+                    {actualVsForecast && (
+                      <span style={{
+                        marginLeft:6, fontSize:9,
+                        color:actualVsForecast==="BEAT"?"#00ff88":actualVsForecast==="MISS"?"#ff4466":"#ffcc00",
+                      }}>{actualVsForecast}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {!hasFired && e.impact==="HIGH" && (
+                <div style={{ fontSize:10, color:"#664444", fontFamily:"monospace", marginTop:6 }}>
+                  ⚠ High volatility expected — consider closing open trades
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div style={{ fontSize:10, color:"#1e3050", fontFamily:"monospace", textAlign:"center", marginTop:20 }}>
+          🐒 SMONKIE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}

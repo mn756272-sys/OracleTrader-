@@ -1,0 +1,660 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  NEXUS TRADER — REACT FRONTEND
+//
+//  WHAT THIS FILE IS:
+//  The "frontend" — everything the user sees and touches.
+//  It talks to your Python backend to get real market data.
+//
+//  HOW REACT WORKS (simplified):
+//  React is a JavaScript library that builds UIs from
+//  "components" — reusable building blocks like Lego.
+//  Each component has:
+//  - State (data it remembers, like prices)
+//  - Props (data passed in from parent)
+//  - JSX (the HTML-like code that describes what to show)
+//
+//  When state changes, React automatically updates only the
+//  parts of the screen that need to change. This is what makes
+//  it fast and efficient for live data apps.
+//
+//  WHAT IS useState?
+//  A React "hook" — a way to store data inside a component.
+//  const [prices, setPrices] = useState({})
+//    → prices = current value
+//    → setPrices = function to update it
+//    → {} = starting value
+//
+//  WHAT IS useEffect?
+//  Runs code when something happens (on mount, or when a value
+//  changes). Used here to:
+//  - Fetch data when the app loads
+//  - Set up a 30-second refresh timer
+// ══════════════════════════════════════════════════════════════
+
+// ── CONFIGURATION ──────────────────────────────────────────────
+// Change this URL to your deployed Render/Railway backend URL
+// For local testing: "http://localhost:8000"
+// After deployment: "https://nexus-trader-api.onrender.com"
+
+const API_BASE = "http://localhost:8000";  // ← CHANGE THIS after deploying
+
+const REFRESH_INTERVAL = 30000; // 30 seconds between data refreshes
+
+// ── SIGNAL COLORS ──────────────────────────────────────────────
+const SIG_COLOR = {
+  "BUY":  { STRONG: "#00ff88", MODERATE: "#44cc88", WEAK: "#4488aa", NEUTRAL: "#334466" },
+  "SELL": { STRONG: "#ff3355", MODERATE: "#ff6644", WEAK: "#aa4433", NEUTRAL: "#334466" },
+  "HOLD": { NEUTRAL: "#ffcc00", MODERATE: "#ffcc00", STRONG: "#ffcc00", WEAK: "#ffcc00" },
+};
+const getColor = (sig, str) => SIG_COLOR[sig]?.[str] || "#334466";
+
+// ── COMPONENTS ─────────────────────────────────────────────────
+
+// Sparkline — tiny price chart for each instrument
+function Spark({ data = [], color = "#00ff88" }) {
+  const w = 60, h = 22;
+  if (!data || data.length < 2) return <div style={{ width: w, height: h }} />;
+  const min = Math.min(...data), max = Math.max(...data);
+  const rng = max - min || 0.0001;
+  const pts = data.map((v, i) =>
+    `${(i / (data.length - 1)) * w},${h - ((v - min) / rng) * (h - 2) - 1}`
+  ).join(" ");
+  return (
+    <svg width={w} height={h}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// RSI gauge bar
+function RsiBar({ value = 50 }) {
+  const color = value <= 30 ? "#00ff88" : value >= 70 ? "#ff3355" : value >= 55 ? "#ff9944" : "#4488aa";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ flex: 1, height: 3, background: "#0d1e32", borderRadius: 2 }}>
+        <div style={{ width: `${value}%`, height: "100%", background: color, borderRadius: 2, transition: "width 1s" }} />
+      </div>
+      <span style={{ fontSize: 10, color, fontFamily: "monospace", minWidth: 28 }}>{value}</span>
+    </div>
+  );
+}
+
+// Loading skeleton
+function Skeleton() {
+  return (
+    <div style={{ padding: 12 }}>
+      {[1,2,3,4].map(i => (
+        <div key={i} style={{
+          background: "#080f1e", border: "1px solid #0d1e32",
+          borderRadius: 8, padding: 14, marginBottom: 8, height: 88,
+          animation: "pulse 1.5s infinite",
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// Connection status badge
+function StatusBadge({ status }) {
+  const cfg = {
+    connected:  { color: "#00ff88", label: "LIVE",    dot: true },
+    loading:    { color: "#ffcc00", label: "LOADING", dot: false },
+    error:      { color: "#ff3355", label: "OFFLINE", dot: false },
+  }[status] || { color: "#334466", label: "---", dot: false };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+      {cfg.dot && (
+        <div style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: cfg.color, animation: "pulse 2s infinite",
+        }} />
+      )}
+      <span style={{ fontSize: 9, color: cfg.color, fontFamily: "monospace", letterSpacing: 1 }}>
+        {cfg.label}
+      </span>
+    </div>
+  );
+}
+
+// ── AI CHAT ────────────────────────────────────────────────────
+// This calls the Claude API directly from the browser.
+// The API key is handled by the Claude artifacts environment.
+
+async function callNexusAI(messages, marketData) {
+  const snapshot = Object.entries(marketData)
+    .map(([sym, d]) => `${sym}: Price=${d.price} RSI=${d.rsi} Signal=${d.signal}(${d.strength}) Change=${d.changePct}%`)
+    .join("\n");
+
+  const system = `You are NEXUS, an elite AI trading analyst bot.
+Live market data right now:
+${snapshot}
+
+Rules:
+- Max 130 words. Be sharp and direct.
+- Use real numbers from the data above.
+- Format: BUY/SELL/HOLD + reason + stop loss + take profit when giving signals.
+- Always mention risk management.
+- Cover forex, gold, ETFs.
+- Never promise guaranteed returns.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+    }),
+  });
+  const data = await res.json();
+  return data.content?.[0]?.text || "Signal unavailable.";
+}
+
+// ── MAIN APP ───────────────────────────────────────────────────
+export default function NexusTrader() {
+  // State — the app's memory
+  const [tab, setTab]         = useState("markets");
+  const [prices, setPrices]   = useState({});   // All market data from backend
+  const [signals, setSignals] = useState([]);   // Signal history feed
+  const [connStatus, setConn] = useState("loading");
+  const [lastUpdate, setLast] = useState(null);
+  const [messages, setMsgs]   = useState([{
+    role: "assistant",
+    content: "NEXUS online. Real market data loaded. Ask me for signals, analysis, or trading strategy on any instrument.",
+  }]);
+  const [input, setInput]   = useState("");
+  const [aiLoading, setAiL] = useState(false);
+  const [selected, setSel]  = useState(null);   // Selected instrument for detail view
+  const chatEnd = useRef(null);
+  const intervalRef = useRef(null);
+
+  // ── FETCH DATA FROM BACKEND ──────────────────────────────────
+  // useCallback memoizes the function so it doesn't get
+  // recreated on every render, preventing infinite loops.
+
+  const fetchPrices = useCallback(async () => {
+    try {
+      // fetch() is the browser's built-in way to make HTTP requests
+      // It returns a Promise — a value that will arrive in the future
+      const res = await fetch(`${API_BASE}/prices`);
+
+      // If the server returned an error status (400, 500 etc)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // .json() parses the response body from JSON text to a JS object
+      const data = await res.json();
+
+      setPrices(data);
+      setConn("connected");
+      setLast(new Date().toLocaleTimeString());
+
+      // Auto-generate signal feed entries from new data
+      const newSigs = Object.values(data)
+        .filter(d => d.signal !== "HOLD")
+        .map(d => ({
+          ...d,
+          id: `${d.symbol}-${Date.now()}`,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        }));
+      if (newSigs.length > 0) {
+        setSignals(prev => [...newSigs, ...prev].slice(0, 30));
+      }
+    } catch (err) {
+      console.error("Backend error:", err);
+      setConn("error");
+    }
+  }, []);
+
+  // Run fetchPrices on mount and every 30 seconds
+  useEffect(() => {
+    fetchPrices();
+    intervalRef.current = setInterval(fetchPrices, REFRESH_INTERVAL);
+    // Cleanup: cancel the interval when the component unmounts
+    return () => clearInterval(intervalRef.current);
+  }, [fetchPrices]);
+
+  // Scroll chat to bottom when new messages arrive
+  useEffect(() => {
+    chatEnd.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // ── SEND MESSAGE TO AI ───────────────────────────────────────
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text || aiLoading) return;
+    const userMsg = { role: "user", content: text };
+    const updated = [...messages, userMsg];
+    setMsgs(updated);
+    setInput("");
+    setAiL(true);
+    try {
+      const reply = await callNexusAI(updated, prices);
+      setMsgs(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMsgs(prev => [...prev, { role: "assistant", content: "⚠ Connection error. Retry." }]);
+    }
+    setAiL(false);
+  }
+
+  const priceList = Object.values(prices);
+  const TABS = [
+    { id: "markets", label: "Markets",  icon: "◈" },
+    { id: "signals", label: "Signals",  icon: "◎" },
+    { id: "nexus",   label: "NEXUS AI", icon: "⬡" },
+  ];
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    ::-webkit-scrollbar{width:3px}
+    ::-webkit-scrollbar-track{background:#060d18}
+    ::-webkit-scrollbar-thumb{background:#1e3050;border-radius:2px}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes scan{0%{top:-2px}100%{top:100vh}}
+    .fadein{animation:fadein 0.3s ease}
+    .scan-line{position:fixed;left:0;right:0;height:120px;
+      background:linear-gradient(transparent,rgba(0,140,255,0.015),transparent);
+      animation:scan 8s linear infinite;pointer-events:none;z-index:9999}
+    input::placeholder{color:#233344}
+    input:focus{border-color:#0044aa !important;outline:none}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="scan-line" />
+      <div style={{
+        fontFamily: "'Rajdhani',sans-serif",
+        background: "#060d18",
+        minHeight: "100vh",
+        color: "#c8d8f0",
+        display: "flex",
+        flexDirection: "column",
+        maxWidth: 520,
+        margin: "0 auto",
+      }}>
+
+        {/* ── HEADER ── */}
+        <div style={{
+          background: "linear-gradient(180deg,#09152a 0%,#060d18 100%)",
+          borderBottom: "1px solid #0d1e32",
+          padding: "12px 16px",
+          display: "flex", alignItems: "center", gap: 12,
+          position: "sticky", top: 0, zIndex: 100,
+        }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8,
+            background: "linear-gradient(135deg,#001840,#002860)",
+            border: "1px solid #004488",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 18, color: "#0088ff",
+          }}>⬡</div>
+          <div>
+            <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 13, color: "#0099ff", letterSpacing: 2 }}>
+              NEXUS TRADER
+            </div>
+            <div style={{ fontSize: 9, color: "#223344", fontFamily: "monospace", letterSpacing: 1 }}>
+              REAL-TIME · AI-POWERED · MULTI-MARKET
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto", textAlign: "right" }}>
+            <StatusBadge status={connStatus} />
+            {lastUpdate && (
+              <div style={{ fontSize: 8, color: "#223344", fontFamily: "monospace", marginTop: 2 }}>
+                {lastUpdate}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── TICKER TAPE ── */}
+        {priceList.length > 0 && (
+          <div style={{
+            background: "#06101c",
+            borderBottom: "1px solid #0a1828",
+            padding: "5px 16px",
+            display: "flex", gap: 18, overflowX: "auto", scrollbarWidth: "none",
+          }}>
+            {priceList.slice(0, 7).map(d => (
+              <div key={d.symbol} style={{ display: "flex", gap: 5, alignItems: "baseline", flexShrink: 0 }}>
+                <span style={{ fontSize: 9, color: "#223344", fontFamily: "monospace" }}>{d.symbol}</span>
+                <span style={{ fontSize: 10, color: "#8899bb", fontFamily: "monospace" }}>{d.price}</span>
+                <span style={{ fontSize: 9, color: d.changePct >= 0 ? "#00ff88" : "#ff3355", fontFamily: "monospace" }}>
+                  {d.changePct >= 0 ? "+" : ""}{d.changePct}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── TABS ── */}
+        <div style={{ display: "flex", background: "#060d18", borderBottom: "1px solid #0a1828" }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => { setTab(t.id); setSel(null); }} style={{
+              flex: 1, background: "none", border: "none",
+              borderBottom: tab === t.id ? "2px solid #0088ff" : "2px solid transparent",
+              color: tab === t.id ? "#0088ff" : "#2a3d55",
+              padding: "10px 4px", fontSize: 12,
+              fontFamily: "'Rajdhani',sans-serif", fontWeight: 600,
+              cursor: "pointer", display: "flex", gap: 5,
+              alignItems: "center", justifyContent: "center",
+              transition: "all 0.2s", letterSpacing: 0.5,
+            }}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── CONTENT ── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+
+          {/* MARKETS */}
+          {tab === "markets" && (
+            <div style={{ overflowY: "auto", padding: 12 }}>
+              {connStatus === "error" && (
+                <div style={{
+                  background: "#1a0808", border: "1px solid #441111",
+                  borderRadius: 8, padding: 14, marginBottom: 12, textAlign: "center",
+                }}>
+                  <div style={{ color: "#ff3355", fontSize: 13, fontWeight: 700 }}>⚠ Backend Offline</div>
+                  <div style={{ color: "#664444", fontSize: 11, marginTop: 4 }}>
+                    Make sure your Python server is running at {API_BASE}
+                  </div>
+                  <button onClick={fetchPrices} style={{
+                    marginTop: 8, background: "#1a0808", border: "1px solid #441111",
+                    color: "#ff6644", borderRadius: 6, padding: "5px 14px",
+                    fontSize: 11, cursor: "pointer", fontFamily: "monospace",
+                  }}>Retry</button>
+                </div>
+              )}
+
+              {connStatus === "loading" && priceList.length === 0 && <Skeleton />}
+
+              <div style={{ fontSize: 9, color: "#1e3050", fontFamily: "monospace", letterSpacing: 1, marginBottom: 10 }}>
+                ◈ {priceList.length} INSTRUMENTS · REFRESHES EVERY 30s
+              </div>
+
+              {/* Detail view */}
+              {selected && prices[selected] && (() => {
+                const d = prices[selected];
+                const color = getColor(d.signal, d.strength);
+                return (
+                  <div className="fadein" style={{
+                    background: "#080f1e", border: `1px solid ${color}33`,
+                    borderRadius: 10, padding: 16, marginBottom: 12,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#ddeeff" }}>{d.symbol}</div>
+                        <div style={{ fontSize: 22, fontFamily: "monospace", color: color, fontWeight: 700 }}>{d.price}</div>
+                      </div>
+                      <button onClick={() => setSel(null)} style={{
+                        background: "none", border: "1px solid #1e3050",
+                        color: "#2a3d55", borderRadius: 6, padding: "4px 10px",
+                        cursor: "pointer", fontFamily: "monospace", fontSize: 12,
+                      }}>✕ Close</button>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                      {[
+                        ["RSI",   d.rsi],
+                        ["ATR",   d.atr],
+                        ["EMA 9", d.ema9],
+                        ["EMA 21",d.ema21],
+                        ["BB Upper", d.bbUpper],
+                        ["BB Lower", d.bbLower],
+                      ].map(([label, val]) => (
+                        <div key={label} style={{
+                          background: "#060d18", border: "1px solid #0d1e32",
+                          borderRadius: 6, padding: "8px 10px",
+                        }}>
+                          <div style={{ fontSize: 9, color: "#2a3d55", fontFamily: "monospace" }}>{label}</div>
+                          <div style={{ fontSize: 13, color: "#aabbd0", fontFamily: "monospace" }}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 10, color: "#2a3d55", fontFamily: "monospace", marginBottom: 4 }}>REASONS</div>
+                      {d.reasons?.map((r, i) => (
+                        <div key={i} style={{ fontSize: 12, color: "#667799", paddingLeft: 8, marginBottom: 3 }}>
+                          → {r}
+                        </div>
+                      ))}
+                    </div>
+                    {d.stopLoss && (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <div style={{ flex: 1, background: "#1a0808", border: "1px solid #441111", borderRadius: 6, padding: "8px 10px" }}>
+                          <div style={{ fontSize: 9, color: "#442222", fontFamily: "monospace" }}>STOP LOSS</div>
+                          <div style={{ fontSize: 13, color: "#ff3355", fontFamily: "monospace" }}>{d.stopLoss}</div>
+                        </div>
+                        <div style={{ flex: 1, background: "#081a10", border: "1px solid #114422", borderRadius: 6, padding: "8px 10px" }}>
+                          <div style={{ fontSize: 9, color: "#224411", fontFamily: "monospace" }}>TAKE PROFIT</div>
+                          <div style={{ fontSize: 13, color: "#00ff88", fontFamily: "monospace" }}>{d.takeProfit}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Instrument cards */}
+              {priceList.map(d => {
+                const color = getColor(d.signal, d.strength);
+                const up = d.changePct >= 0;
+                return (
+                  <div key={d.symbol} onClick={() => setSel(d.symbol === selected ? null : d.symbol)}
+                    className="fadein"
+                    style={{
+                      background: "#080f1e",
+                      border: `1px solid ${selected === d.symbol ? color + "55" : "#0d1e32"}`,
+                      borderLeft: `3px solid ${color}44`,
+                      borderRadius: 8, padding: "12px 14px", marginBottom: 8,
+                      cursor: "pointer", transition: "border-color 0.2s",
+                    }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#ddeeff", letterSpacing: 0.5 }}>{d.symbol}</div>
+                        <div style={{ fontSize: 10, color: "#1e3050", fontFamily: "monospace" }}>
+                          {d.symbol.includes("/") ? (d.symbol.includes("XAU") ? "COMMODITY" : "FOREX") : "ETF"}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#ddeeff", fontFamily: "'Share Tech Mono',monospace" }}>
+                          {d.price}
+                        </div>
+                        <div style={{ fontSize: 10, color: up ? "#00ff88" : "#ff3355", fontFamily: "monospace" }}>
+                          {up ? "▲" : "▼"} {up ? "+" : ""}{d.changePct}%
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 9, color: "#1e3050", marginBottom: 3, fontFamily: "monospace" }}>RSI</div>
+                        <RsiBar value={d.rsi} />
+                      </div>
+                      <Spark data={d.history} color={up ? "#00ff88" : "#ff3355"} />
+                      <div style={{
+                        background: color + "18", border: `1px solid ${color}44`,
+                        borderRadius: 4, padding: "4px 10px", fontSize: 11,
+                        color, fontFamily: "monospace", fontWeight: "bold",
+                        minWidth: 50, textAlign: "center",
+                      }}>
+                        {d.signal}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* SIGNALS */}
+          {tab === "signals" && (
+            <div style={{ overflowY: "auto", padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ fontSize: 9, color: "#1e3050", fontFamily: "monospace", letterSpacing: 1 }}>
+                  ◎ LIVE SIGNAL FEED
+                </div>
+                <StatusBadge status={connStatus} />
+              </div>
+              {signals.length === 0 && (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "#1e3050", fontFamily: "monospace", fontSize: 11 }}>
+                  <div style={{ fontSize: 30, marginBottom: 12 }}>◎</div>
+                  Waiting for signals...<br />They appear here automatically.
+                </div>
+              )}
+              {signals.map(s => {
+                const color = getColor(s.signal, s.strength);
+                return (
+                  <div key={s.id} className="fadein" style={{
+                    background: "#080f1e",
+                    border: `1px solid ${color}22`,
+                    borderLeft: `3px solid ${color}`,
+                    borderRadius: 8, padding: "12px 14px", marginBottom: 8,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span style={{
+                          background: color + "20", border: `1px solid ${color}50`,
+                          color, fontSize: 10, fontWeight: "bold", fontFamily: "monospace",
+                          padding: "2px 8px", borderRadius: 3,
+                        }}>{s.signal}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#ddeeff" }}>{s.symbol}</span>
+                      </div>
+                      <span style={{ fontSize: 9, color: "#1e3050", fontFamily: "monospace" }}>{s.time}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#2a3d55" }}>
+                      <span>Price <span style={{ color: "#8899bb", fontFamily: "monospace" }}>{s.price}</span></span>
+                      <span>RSI <span style={{ color, fontFamily: "monospace" }}>{s.rsi}</span></span>
+                      <span style={{ color: "#1e3050" }}>{s.strength}</span>
+                    </div>
+                    {s.reasons?.slice(0, 2).map((r, i) => (
+                      <div key={i} style={{ fontSize: 10, color: "#1e3050", marginTop: 4 }}>→ {r}</div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* NEXUS AI CHAT */}
+          {tab === "nexus" && (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              {/* Quick prompts */}
+              <div style={{ padding: "8px 12px 0", display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+                {["Best signal now?","Analyse EUR/USD","USD/ZAR outlook","Gold trade setup","Risk strategy $500"].map((q, i) => (
+                  <button key={i} onClick={() => setInput(q)} style={{
+                    background: "#0a1628", border: "1px solid #0e2040",
+                    borderRadius: 20, color: "#2a4466", fontSize: 11,
+                    padding: "5px 12px", cursor: "pointer",
+                    whiteSpace: "nowrap", fontFamily: "'Rajdhani',sans-serif", flexShrink: 0,
+                  }}>{q}</button>
+                ))}
+              </div>
+
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0" }}>
+                {messages.map((m, i) => (
+                  <div key={i} className={i > 0 ? "fadein" : ""} style={{
+                    marginBottom: 12,
+                    display: "flex",
+                    flexDirection: m.role === "user" ? "row-reverse" : "row",
+                    gap: 8, alignItems: "flex-start",
+                  }}>
+                    {m.role === "assistant" && (
+                      <div style={{
+                        width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+                        background: "linear-gradient(135deg,#001840,#002060)",
+                        border: "1px solid #00336622",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 12, color: "#0066cc",
+                      }}>⬡</div>
+                    )}
+                    <div style={{
+                      maxWidth: "83%",
+                      background: m.role === "user" ? "#091828" : "#080f1e",
+                      border: "1px solid #0d1e32",
+                      borderRadius: m.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+                      padding: "10px 13px",
+                      fontSize: 13, color: "#8899bb", lineHeight: 1.65,
+                      whiteSpace: "pre-wrap",
+                    }}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+                {aiLoading && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                    <div style={{
+                      width: 26, height: 26, borderRadius: 6,
+                      background: "linear-gradient(135deg,#001840,#002060)",
+                      border: "1px solid #00336622",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 12, color: "#0066cc",
+                    }}>⬡</div>
+                    <div style={{
+                      background: "#080f1e", border: "1px solid #0d1e32",
+                      borderRadius: "12px 12px 12px 2px", padding: "12px 16px",
+                      display: "flex", gap: 5, alignItems: "center",
+                    }}>
+                      {[0,1,2].map(j => (
+                        <div key={j} style={{
+                          width: 5, height: 5, borderRadius: "50%", background: "#0066cc",
+                          animation: `pulse 1.2s ${j * 0.2}s infinite`,
+                        }} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEnd} />
+              </div>
+
+              {/* Input */}
+              <div style={{
+                padding: "8px 12px 12px",
+                background: "#060d18", borderTop: "1px solid #0a1828",
+                display: "flex", gap: 8,
+              }}>
+                <input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && sendMessage()}
+                  placeholder="Ask NEXUS anything..."
+                  style={{
+                    flex: 1, background: "#080f1e",
+                    border: "1px solid #0d1e32", borderRadius: 8,
+                    color: "#8899bb", padding: "10px 14px",
+                    fontSize: 13, fontFamily: "'Rajdhani',sans-serif",
+                  }}
+                />
+                <button onClick={sendMessage} disabled={aiLoading || !input.trim()} style={{
+                  background: aiLoading || !input.trim() ? "#0a1628" : "linear-gradient(135deg,#003388,#0055aa)",
+                  border: "1px solid #003388", borderRadius: 8,
+                  color: aiLoading || !input.trim() ? "#1e3050" : "#fff",
+                  padding: "10px 16px", fontSize: 16,
+                  cursor: aiLoading || !input.trim() ? "default" : "pointer",
+                  transition: "all 0.2s", fontFamily: "monospace",
+                }}>▶</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* FOOTER */}
+        <div style={{
+          borderTop: "1px solid #0a1828", padding: "6px 16px",
+          display: "flex", justifyContent: "space-between",
+          fontSize: 8, color: "#0f1f30", fontFamily: "monospace",
+        }}>
+          <span>NEXUS v2.0 · REAL DATA</span>
+          <span>⚠ NOT FINANCIAL ADVICE</span>
+          <span>API: {API_BASE.replace("http://","")}</span>
+        </div>
+      </div>
+    </>
+  );
+}

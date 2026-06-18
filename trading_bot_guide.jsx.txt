@@ -1,0 +1,492 @@
+import { useState } from "react";
+
+const steps = [
+  {
+    id: 1,
+    title: "Install Python Libraries",
+    icon: "📦",
+    color: "#00ff88",
+    commands: [
+      "pip install yfinance",
+      "pip install pandas ta",
+      "pip install requests schedule",
+    ],
+    note: "Run these in your terminal or Replit shell",
+  },
+  {
+    id: 2,
+    title: "Create Telegram Bot",
+    icon: "🤖",
+    color: "#00ccff",
+    steps: [
+      "Open Telegram app on your phone",
+      'Search for @BotFather and tap START',
+      'Send the message: /newbot',
+      "Follow prompts — give your bot a name",
+      "Copy the BOT TOKEN it gives you",
+    ],
+    note: "Example token: 7412345678:AAHdQ...",
+  },
+  {
+    id: 3,
+    title: "Get Your Chat ID",
+    icon: "🔑",
+    color: "#ffcc00",
+    steps: [
+      "Send any message to your new bot",
+      "Open this URL in your browser:",
+    ],
+    url: "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates",
+    urlNote: 'Look for "id" inside "chat" — that is your CHAT_ID',
+    note: "Example chat ID: 123456789",
+  },
+  {
+    id: 4,
+    title: "Configure the Bot File",
+    icon: "⚙️",
+    color: "#ff6644",
+    steps: [
+      'Open trading_alert_bot.py',
+      'Replace YOUR_BOT_TOKEN_HERE with your token',
+      'Replace YOUR_CHAT_ID_HERE with your chat ID',
+      'Edit WATCHLIST to your preferred tickers',
+      'Adjust RSI_OVERSOLD and RSI_OVERBOUGHT if needed',
+    ],
+    note: "Save the file when done",
+  },
+  {
+    id: 5,
+    title: "Run the Bot",
+    icon: "🚀",
+    color: "#bb44ff",
+    commands: ["python trading_alert_bot.py"],
+    steps: [
+      "Bot sends startup message to Telegram",
+      "First scan runs immediately",
+      "Then scans every 15 minutes automatically",
+      "Daily summary sent at 09:00",
+    ],
+    note: "For 24/7 running, deploy to Replit or AWS",
+  },
+];
+
+const signals = [
+  { emoji: "🟢🟢", label: "STRONG BUY", desc: "RSI ≤ 30 (Oversold)", color: "#00ff88" },
+  { emoji: "🟢", label: "BUY", desc: "MACD or EMA crossover", color: "#44cc88" },
+  { emoji: "🔵", label: "WEAK BUY", desc: "Bollinger Band bounce", color: "#4488ff" },
+  { emoji: "🔴🔴", label: "STRONG SELL", desc: "RSI ≥ 70 (Overbought)", color: "#ff4444" },
+  { emoji: "🔴", label: "SELL", desc: "MACD or EMA death cross", color: "#cc4444" },
+  { emoji: "⚡", label: "ALERT", desc: "Volume spike detected", color: "#ffcc00" },
+];
+
+const tickers = [
+  { symbol: "SPY", name: "S&P 500 ETF", note: "Tracks full S&P 500 index" },
+  { symbol: "AAPL", name: "Apple Inc", note: "Most liquid US stock" },
+  { symbol: "TSLA", name: "Tesla", note: "High volatility, big moves" },
+  { symbol: "GLD", name: "Gold ETF", note: "Safe haven asset" },
+  { symbol: "USO", name: "Oil ETF", note: "Crude oil exposure" },
+];
+
+export default function TradingBotGuide() {
+  const [activeTab, setActiveTab] = useState("setup");
+  const [expandedStep, setExpandedStep] = useState(1);
+  const [copied, setCopied] = useState(null);
+
+  const copy = (text, id) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  return (
+    <div style={{
+      fontFamily: "'Courier New', monospace",
+      background: "#0a0e1a",
+      minHeight: "100vh",
+      color: "#e0e6ff",
+      padding: "0 0 60px 0",
+    }}>
+      {/* Header */}
+      <div style={{
+        background: "linear-gradient(135deg, #0f1929 0%, #1a0a2e 100%)",
+        borderBottom: "1px solid #00ff8833",
+        padding: "20px 16px 0",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <span style={{ fontSize: 28 }}>📡</span>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: "bold", color: "#00ff88", letterSpacing: 1 }}>
+              TRADING ALERT BOT
+            </div>
+            <div style={{ fontSize: 11, color: "#556688" }}>
+              Telegram + Python + S&P 500 Data
+            </div>
+          </div>
+          <div style={{
+            marginLeft: "auto",
+            background: "#00ff8822",
+            border: "1px solid #00ff8844",
+            borderRadius: 20,
+            padding: "3px 10px",
+            fontSize: 11,
+            color: "#00ff88",
+          }}>
+            ● LIVE
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 0, marginTop: 16 }}>
+          {[
+            { id: "setup", label: "⚙️ Setup" },
+            { id: "signals", label: "📊 Signals" },
+            { id: "tickers", label: "📋 Tickers" },
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              flex: 1,
+              background: "none",
+              border: "none",
+              borderBottom: activeTab === tab.id ? "2px solid #00ff88" : "2px solid transparent",
+              color: activeTab === tab.id ? "#00ff88" : "#556688",
+              padding: "10px 4px",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              transition: "all 0.2s",
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "16px" }}>
+
+        {/* SETUP TAB */}
+        {activeTab === "setup" && (
+          <div>
+            <div style={{ fontSize: 12, color: "#556688", marginBottom: 14 }}>
+              Complete these 5 steps in order:
+            </div>
+            {steps.map(step => (
+              <div key={step.id} style={{
+                background: expandedStep === step.id ? "#111827" : "#0d1420",
+                border: `1px solid ${expandedStep === step.id ? step.color + "44" : "#1e2a3a"}`,
+                borderRadius: 10,
+                marginBottom: 10,
+                overflow: "hidden",
+                transition: "all 0.2s",
+              }}>
+                <button onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
+                  style={{
+                    width: "100%", background: "none", border: "none",
+                    padding: "14px 16px", display: "flex", alignItems: "center",
+                    gap: 10, cursor: "pointer", textAlign: "left",
+                  }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: "50%",
+                    background: step.color + "22",
+                    border: `1px solid ${step.color}55`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 16, flexShrink: 0,
+                  }}>
+                    {step.icon}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: step.color, fontSize: 13, fontWeight: "bold" }}>
+                      Step {step.id}
+                    </div>
+                    <div style={{ color: "#c0ccee", fontSize: 14 }}>{step.title}</div>
+                  </div>
+                  <div style={{ color: "#556688", fontSize: 18 }}>
+                    {expandedStep === step.id ? "▲" : "▼"}
+                  </div>
+                </button>
+
+                {expandedStep === step.id && (
+                  <div style={{ padding: "0 16px 16px" }}>
+                    {step.commands?.map((cmd, i) => (
+                      <div key={i} style={{
+                        background: "#060c18",
+                        border: "1px solid #1e2a3a",
+                        borderRadius: 6,
+                        padding: "10px 12px",
+                        marginBottom: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}>
+                        <code style={{ color: "#00ff88", fontSize: 13 }}>{cmd}</code>
+                        <button onClick={() => copy(cmd, `cmd-${i}-${step.id}`)}
+                          style={{
+                            background: "none", border: "1px solid #1e2a3a",
+                            borderRadius: 4, color: copied === `cmd-${i}-${step.id}` ? "#00ff88" : "#556688",
+                            padding: "3px 8px", fontSize: 11, cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}>
+                          {copied === `cmd-${i}-${step.id}` ? "✓" : "copy"}
+                        </button>
+                      </div>
+                    ))}
+                    {step.steps?.map((s, i) => (
+                      <div key={i} style={{
+                        display: "flex", gap: 10, padding: "6px 0",
+                        borderBottom: "1px solid #0f1929",
+                      }}>
+                        <span style={{ color: step.color, fontSize: 12, minWidth: 20 }}>{i + 1}.</span>
+                        <span style={{ color: "#a0b0cc", fontSize: 13 }}>{s}</span>
+                      </div>
+                    ))}
+                    {step.url && (
+                      <div style={{
+                        background: "#060c18",
+                        border: "1px solid #ffcc0033",
+                        borderRadius: 6,
+                        padding: "10px 12px",
+                        margin: "10px 0",
+                      }}>
+                        <code style={{ color: "#ffcc00", fontSize: 11, wordBreak: "break-all" }}>
+                          {step.url}
+                        </code>
+                        <div style={{ color: "#556688", fontSize: 11, marginTop: 6 }}>
+                          {step.urlNote}
+                        </div>
+                      </div>
+                    )}
+                    {step.note && (
+                      <div style={{
+                        background: step.color + "11",
+                        borderLeft: `3px solid ${step.color}`,
+                        padding: "8px 12px",
+                        borderRadius: "0 6px 6px 0",
+                        marginTop: 10,
+                        fontSize: 12,
+                        color: "#a0b0cc",
+                      }}>
+                        💡 {step.note}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Deploy option */}
+            <div style={{
+              background: "#0d1420",
+              border: "1px solid #bb44ff44",
+              borderRadius: 10,
+              padding: 16,
+              marginTop: 8,
+            }}>
+              <div style={{ color: "#bb44ff", fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>
+                ☁️ Run 24/7 on the Cloud (Recommended)
+              </div>
+              {[
+                { name: "Replit", url: "replit.com", note: "Free, runs in browser" },
+                { name: "PythonAnywhere", url: "pythonanywhere.com", note: "Free tier available" },
+                { name: "DigitalOcean", url: "digitalocean.com", note: "$5/month droplet" },
+              ].map((opt, i) => (
+                <div key={i} style={{
+                  display: "flex", justifyContent: "space-between",
+                  padding: "8px 0", borderBottom: i < 2 ? "1px solid #0f1929" : "none",
+                }}>
+                  <div>
+                    <div style={{ color: "#c0ccee", fontSize: 13 }}>{opt.name}</div>
+                    <div style={{ color: "#556688", fontSize: 11 }}>{opt.note}</div>
+                  </div>
+                  <code style={{ color: "#bb44ff", fontSize: 11, alignSelf: "center" }}>
+                    {opt.url}
+                  </code>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* SIGNALS TAB */}
+        {activeTab === "signals" && (
+          <div>
+            <div style={{ fontSize: 12, color: "#556688", marginBottom: 14 }}>
+              What each Telegram alert means:
+            </div>
+
+            {/* Sample message preview */}
+            <div style={{
+              background: "#111827",
+              border: "1px solid #00ff8833",
+              borderRadius: 10,
+              padding: 16,
+              marginBottom: 16,
+            }}>
+              <div style={{ color: "#556688", fontSize: 11, marginBottom: 10 }}>
+                📱 EXAMPLE TELEGRAM MESSAGE:
+              </div>
+              <div style={{
+                background: "#0a0e1a",
+                borderRadius: 8,
+                padding: 12,
+                fontSize: 13,
+                lineHeight: 1.8,
+                color: "#c0ccee",
+              }}>
+                <div>🟢🟢 <strong style={{ color: "#00ff88" }}>BUY SIGNAL — SPY</strong></div>
+                <div style={{ color: "#334455" }}>━━━━━━━━━━━━━━━━━━━━</div>
+                <div>📌 Reason&nbsp;&nbsp;&nbsp;&nbsp; : RSI Oversold (28.4)</div>
+                <div>💰 Price&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : $451.30</div>
+                <div>📊 RSI&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : 28.4</div>
+                <div>📦 Vol Spike&nbsp; : 2.1x</div>
+                <div>🛑 Stop Loss&nbsp; : $447.50</div>
+                <div>🎯 Take Profit: $456.80</div>
+                <div>💡 Strength&nbsp;&nbsp; : STRONG</div>
+                <div>🕐 Time&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : 10:15:22</div>
+                <div style={{ color: "#334455" }}>━━━━━━━━━━━━━━━━━━━━</div>
+                <div style={{ color: "#556688", fontSize: 11 }}>⚠️ Not financial advice.</div>
+              </div>
+            </div>
+
+            {/* Signal types */}
+            {signals.map((sig, i) => (
+              <div key={i} style={{
+                background: "#0d1420",
+                border: `1px solid ${sig.color}22`,
+                borderRadius: 8,
+                padding: "12px 14px",
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}>
+                <div style={{ fontSize: 22, minWidth: 40, textAlign: "center" }}>{sig.emoji}</div>
+                <div>
+                  <div style={{ color: sig.color, fontSize: 13, fontWeight: "bold" }}>{sig.label}</div>
+                  <div style={{ color: "#a0b0cc", fontSize: 12 }}>{sig.desc}</div>
+                </div>
+              </div>
+            ))}
+
+            {/* Indicators used */}
+            <div style={{
+              background: "#111827",
+              border: "1px solid #1e2a3a",
+              borderRadius: 10,
+              padding: 16,
+              marginTop: 8,
+            }}>
+              <div style={{ color: "#c0ccee", fontSize: 13, fontWeight: "bold", marginBottom: 12 }}>
+                📐 Indicators Used
+              </div>
+              {[
+                { name: "RSI (14)", desc: "Momentum — oversold/overbought", color: "#00ff88" },
+                { name: "MACD", desc: "Trend — crossover signals", color: "#00ccff" },
+                { name: "EMA 9/21", desc: "Short-term trend direction", color: "#ffcc00" },
+                { name: "Bollinger Bands", desc: "Volatility + price extremes", color: "#ff6644" },
+                { name: "ATR (14)", desc: "Sets stop loss & take profit", color: "#bb44ff" },
+                { name: "Volume", desc: "Spike = unusual activity alert", color: "#ff44aa" },
+              ].map((ind, i) => (
+                <div key={i} style={{
+                  display: "flex", gap: 10, padding: "8px 0",
+                  borderBottom: i < 5 ? "1px solid #0f1929" : "none",
+                }}>
+                  <div style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: ind.color, marginTop: 5, flexShrink: 0,
+                  }} />
+                  <div>
+                    <div style={{ color: ind.color, fontSize: 13 }}>{ind.name}</div>
+                    <div style={{ color: "#556688", fontSize: 11 }}>{ind.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TICKERS TAB */}
+        {activeTab === "tickers" && (
+          <div>
+            <div style={{ fontSize: 12, color: "#556688", marginBottom: 14 }}>
+              Default watchlist — edit in the bot file:
+            </div>
+            {tickers.map((t, i) => (
+              <div key={i} style={{
+                background: "#0d1420",
+                border: "1px solid #1e2a3a",
+                borderRadius: 8,
+                padding: "14px 16px",
+                marginBottom: 8,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ color: "#00ff88", fontSize: 15, fontWeight: "bold" }}>{t.symbol}</div>
+                  <div style={{ color: "#c0ccee", fontSize: 13 }}>{t.name}</div>
+                  <div style={{ color: "#556688", fontSize: 11 }}>{t.note}</div>
+                </div>
+                <button onClick={() => copy(t.symbol, `ticker-${i}`)} style={{
+                  background: copied === `ticker-${i}` ? "#00ff8822" : "#0a0e1a",
+                  border: `1px solid ${copied === `ticker-${i}` ? "#00ff88" : "#1e2a3a"}`,
+                  borderRadius: 6, color: copied === `ticker-${i}` ? "#00ff88" : "#556688",
+                  padding: "6px 12px", fontSize: 12, cursor: "pointer",
+                  fontFamily: "inherit",
+                }}>
+                  {copied === `ticker-${i}` ? "✓ Copied" : "copy"}
+                </button>
+              </div>
+            ))}
+
+            <div style={{
+              background: "#111827",
+              border: "1px solid #00ccff33",
+              borderRadius: 10,
+              padding: 16,
+              marginTop: 8,
+            }}>
+              <div style={{ color: "#00ccff", fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>
+                🌍 Africa-Relevant Tickers to Add
+              </div>
+              {[
+                { sym: "GLD", desc: "Gold — tied to ZIM mining sector" },
+                { sym: "COPX", desc: "Copper ETF — African mining proxy" },
+                { sym: "LIT", desc: "Lithium ETF — tracks battery metals" },
+                { sym: "EWZ", desc: "Brazil — emerging market proxy" },
+                { sym: "EZA", desc: "South Africa ETF" },
+              ].map((t, i) => (
+                <div key={i} style={{
+                  display: "flex", justifyContent: "space-between",
+                  padding: "7px 0",
+                  borderBottom: i < 4 ? "1px solid #0f1929" : "none",
+                }}>
+                  <div>
+                    <span style={{ color: "#00ccff", fontSize: 13 }}>{t.sym}</span>
+                    <span style={{ color: "#556688", fontSize: 12, marginLeft: 10 }}>{t.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{
+              background: "#0d1420",
+              border: "1px solid #ff664433",
+              borderRadius: 10,
+              padding: 16,
+              marginTop: 10,
+            }}>
+              <div style={{ color: "#ff6644", fontSize: 13, fontWeight: "bold", marginBottom: 6 }}>
+                ⚠️ Risk Reminder
+              </div>
+              <div style={{ color: "#a0b0cc", fontSize: 12, lineHeight: 1.7 }}>
+                This bot generates signals — not guaranteed profits.
+                Always use a stop loss. Never risk more than 1–2% of
+                your account per trade. Paper trade for at least
+                1 month before using real money.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

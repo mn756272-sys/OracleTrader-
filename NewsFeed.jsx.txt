@@ -1,0 +1,428 @@
+import { useState, useEffect } from "react";
+
+// ══════════════════════════════════════════════════════════════
+//  ORACLE TRADER — NEWS FEED
+//  Real financial news per instrument using free APIs
+//  Sources: Finnhub, CryptoCompare, ForexFactory-style events
+// ══════════════════════════════════════════════════════════════
+
+// ── HOW TO GET REAL NEWS ──────────────────────────────────────
+// 1. Finnhub (forex + stocks): finnhub.io — free 60 calls/min
+//    GET https://finnhub.io/api/v1/news?category=forex&token=YOUR_KEY
+// 2. CryptoCompare (crypto): cryptocompare.com — free tier
+//    GET https://min-api.cryptocompare.com/data/v2/news/?lang=EN
+// 3. NewsAPI (general): newsapi.org — free 100 calls/day
+//    GET https://newsapi.org/v2/everything?q=forex&apiKey=YOUR_KEY
+// ─────────────────────────────────────────────────────────────
+
+const SAMPLE_NEWS = [
+  {
+    id:1, time:"2 min ago", source:"Reuters",
+    headline:"ECB signals pause in rate cuts as inflation stays sticky",
+    summary:"European Central Bank officials indicated they may hold rates steady at the next meeting after CPI data came in above expectations, putting EUR/USD bulls on alert.",
+    tickers:["EUR/USD","EUR/ZAR"],
+    impact:"HIGH", sentiment:"BEARISH",
+    category:"CENTRAL BANK",
+    url:"#",
+  },
+  {
+    id:2, time:"14 min ago", source:"Bloomberg",
+    headline:"Bitcoin surges past $68,000 as ETF inflows hit record",
+    summary:"BTC climbed to its highest level in three weeks driven by strong institutional demand through spot ETFs. Analysts see potential move toward $72,000 if momentum holds.",
+    tickers:["BTC/USD","ETH/USD"],
+    impact:"HIGH", sentiment:"BULLISH",
+    category:"CRYPTO",
+    url:"#",
+  },
+  {
+    id:3, time:"31 min ago", source:"ForexFactory",
+    headline:"US Non-Farm Payrolls beat forecast at 203K vs 185K expected",
+    summary:"Strong jobs data pushed USD higher across the board. USD/ZAR fell sharply as dollar demand surged. Traders now pricing in fewer Fed cuts this year.",
+    tickers:["USD/ZAR","EUR/USD","GBP/USD","USD/JPY"],
+    impact:"HIGH", sentiment:"USD BULLISH",
+    category:"ECONOMIC DATA",
+    url:"#",
+  },
+  {
+    id:4, time:"52 min ago", source:"Kitco",
+    headline:"Gold retreats from resistance at $2,350 on strong dollar",
+    summary:"XAU/USD pulled back after failing to break above the $2,350 resistance zone. Dollar strength following NFP data weighed on gold. Key support at $2,320.",
+    tickers:["XAU/USD"],
+    impact:"MEDIUM", sentiment:"BEARISH",
+    category:"COMMODITY",
+    url:"#",
+  },
+  {
+    id:5, time:"1 hr ago", source:"CNBC",
+    headline:"Fed minutes reveal division on timing of rate cuts",
+    summary:"Minutes from the latest FOMC meeting showed officials split on when to begin cutting rates. Some members want to see more inflation progress before easing.",
+    tickers:["EUR/USD","GBP/USD","USD/JPY","SPY"],
+    impact:"HIGH", sentiment:"NEUTRAL",
+    category:"CENTRAL BANK",
+    url:"#",
+  },
+  {
+    id:6, time:"1 hr ago", source:"CoinDesk",
+    headline:"Ethereum developers confirm next upgrade timeline",
+    summary:"ETH core developers confirmed the next network upgrade is on track for Q3. The update promises improved scalability and lower gas fees.",
+    tickers:["ETH/USD"],
+    impact:"MEDIUM", sentiment:"BULLISH",
+    category:"CRYPTO",
+    url:"#",
+  },
+  {
+    id:7, time:"2 hrs ago", source:"Deriv Blog",
+    headline:"Boom & Crash indices see elevated volatility ahead of US data",
+    summary:"Synthetic indices on the Deriv platform showed above-average spike frequency in the hours leading up to US economic releases. Traders advised to use wider stops.",
+    tickers:["Boom 1000","Boom 500","Crash 1000","Crash 500"],
+    impact:"MEDIUM", sentiment:"CAUTION",
+    category:"SYNTHETIC",
+    url:"#",
+  },
+  {
+    id:8, time:"2 hrs ago", source:"Reuters",
+    headline:"South African rand weakens as load shedding concerns return",
+    summary:"ZAR fell against major currencies as Eskom announced stage 4 load shedding for the week. USD/ZAR climbed toward 18.80 resistance.",
+    tickers:["USD/ZAR","GBP/ZAR","EUR/ZAR"],
+    impact:"MEDIUM", sentiment:"ZAR BEARISH",
+    category:"EMERGING MARKETS",
+    url:"#",
+  },
+  {
+    id:9, time:"3 hrs ago", source:"FXStreet",
+    headline:"GBP/USD eyes 1.28 as UK inflation surprises to the upside",
+    summary:"Sterling strengthened after UK CPI came in at 3.2% vs 3.0% expected. The data reduces chances of a Bank of England rate cut in June.",
+    tickers:["GBP/USD","GBP/ZAR"],
+    impact:"HIGH", sentiment:"BULLISH",
+    category:"ECONOMIC DATA",
+    url:"#",
+  },
+  {
+    id:10, time:"4 hrs ago", source:"MarketWatch",
+    headline:"SPY hits new all-time high as tech earnings impress",
+    summary:"The S&P 500 ETF reached a record close driven by strong quarterly results from major technology companies. Analysts maintain bullish targets for the index.",
+    tickers:["SPY","LIT"],
+    impact:"MEDIUM", sentiment:"BULLISH",
+    category:"STOCKS",
+    url:"#",
+  },
+];
+
+const IMPACT_COLOR  = { HIGH:"#ff4466", MEDIUM:"#ffcc00", LOW:"#00aaff" };
+const SENT_COLOR    = (s) => {
+  if (s.includes("BULL")) return "#00ff88";
+  if (s.includes("BEAR")) return "#ff4466";
+  if (s==="CAUTION")      return "#ff9944";
+  return "#aabbdd";
+};
+
+const CATEGORIES = ["ALL","CENTRAL BANK","ECONOMIC DATA","CRYPTO","COMMODITY","SYNTHETIC","EMERGING MARKETS","STOCKS"];
+const INSTRUMENTS = ["ALL","EUR/USD","GBP/USD","USD/ZAR","XAU/USD","BTC/USD","ETH/USD","Boom 1000","Crash 1000","SPY"];
+
+export default function NewsFeed() {
+  const [news,       setNews]    = useState(SAMPLE_NEWS);
+  const [loading,    setLoading] = useState(false);
+  const [category,   setCat]     = useState("ALL");
+  const [instrument, setInst]    = useState("ALL");
+  const [impact,     setImpact]  = useState("ALL");
+  const [expanded,   setExp]     = useState(null);
+  const [apiKey,     setApiKey]  = useState("");
+  const [showSetup,  setSetup]   = useState(false);
+
+  // Filter news
+  const filtered = news.filter(n => {
+    const catMatch  = category==="ALL"   || n.category===category;
+    const instMatch = instrument==="ALL" || n.tickers.includes(instrument);
+    const impMatch  = impact==="ALL"     || n.impact===impact;
+    return catMatch && instMatch && impMatch;
+  });
+
+  // Fetch real news from Finnhub
+  async function fetchRealNews() {
+    if (!apiKey) { setSetup(true); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `https://finnhub.io/api/v1/news?category=forex&token=${apiKey}`
+      );
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped = data.slice(0,15).map((item,i) => ({
+          id:         i+100,
+          time:       new Date(item.datetime*1000).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+          source:     item.source,
+          headline:   item.headline,
+          summary:    item.summary,
+          tickers:    item.related ? item.related.split(",") : [],
+          impact:     "MEDIUM",
+          sentiment:  "NEUTRAL",
+          category:   "FOREX",
+          url:        item.url,
+        }));
+        setNews(mapped);
+      }
+    } catch(e) {
+      console.error("News fetch error:", e);
+    }
+    setLoading(false);
+  }
+
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    if (!apiKey) return;
+    fetchRealNews();
+    const iv = setInterval(fetchRealNews, 300000);
+    return () => clearInterval(iv);
+  }, [apiKey]);
+
+  const css = `
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700;900&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#060d18}
+    input{outline:none}
+    input:focus{border-color:#6622cc !important}
+    input::placeholder{color:#233344}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+    @keyframes fadein{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    .fadein{animation:fadein 0.25s ease}
+    ::-webkit-scrollbar{height:3px;width:3px}
+    ::-webkit-scrollbar-track{background:#060d18}
+    ::-webkit-scrollbar-thumb{background:#2a1a4a}
+  `;
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{fontFamily:"'Rajdhani',sans-serif",background:"#060d18",
+        minHeight:"100vh",color:"#c8d8f0",maxWidth:520,margin:"0 auto",padding:"16px"}}>
+
+        {/* Header */}
+        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,
+          color:"#9944ff",letterSpacing:2,marginBottom:4}}>ORACLE TRADER</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:22,fontWeight:900,color:"#ddeeff"}}>📰 News Feed</div>
+            <div style={{fontSize:11,color:"#334466",fontFamily:"monospace"}}>
+              {filtered.length} articles · updates every 5 min
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {loading && (
+              <div style={{width:8,height:8,borderRadius:"50%",
+                background:"#9944ff",animation:"pulse 1s infinite"}}/>
+            )}
+            <button onClick={fetchRealNews} style={{
+              background:"linear-gradient(135deg,#6622cc,#9944ff)",
+              border:"none",borderRadius:8,color:"#fff",
+              padding:"7px 14px",fontSize:11,cursor:"pointer",
+              fontFamily:"'Rajdhani',sans-serif",fontWeight:700,
+            }}>
+              {loading?"Loading...":"↻ Refresh"}
+            </button>
+            <button onClick={()=>setSetup(s=>!s)} style={{
+              background:"#080f1e",border:"1px solid #0d1e32",borderRadius:8,
+              color:"#334466",padding:"7px 12px",fontSize:11,cursor:"pointer",
+              fontFamily:"monospace",
+            }}>⚙</button>
+          </div>
+        </div>
+
+        {/* API Setup panel */}
+        {showSetup && (
+          <div className="fadein" style={{background:"#080f1e",border:"1px solid #9944ff33",
+            borderRadius:10,padding:14,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#cc77ff",marginBottom:8}}>
+              🔑 Connect Real News API
+            </div>
+            <div style={{fontSize:12,color:"#667799",marginBottom:12,lineHeight:1.6}}>
+              Get a free API key from{" "}
+              <span style={{color:"#9944ff",fontFamily:"monospace"}}>finnhub.io</span>{" "}
+              for live forex news, or{" "}
+              <span style={{color:"#9944ff",fontFamily:"monospace"}}>newsapi.org</span>{" "}
+              for general financial news.
+            </div>
+            <div style={{fontSize:9,color:"#334466",fontFamily:"monospace",marginBottom:5}}>FINNHUB API KEY</div>
+            <div style={{display:"flex",gap:8}}>
+              <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+                placeholder="Enter your free Finnhub key..."
+                style={{flex:1,background:"#060d18",border:"1px solid #0d1e32",
+                  borderRadius:8,color:"#aabbd0",padding:"10px 12px",
+                  fontSize:13,fontFamily:"monospace"}}/>
+              <button onClick={()=>{fetchRealNews();setSetup(false);}} style={{
+                background:"linear-gradient(135deg,#6622cc,#9944ff)",
+                border:"none",borderRadius:8,color:"#fff",
+                padding:"10px 16px",fontSize:12,cursor:"pointer",
+                fontFamily:"'Rajdhani',sans-serif",fontWeight:700,
+              }}>Connect</button>
+            </div>
+            <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",marginTop:8}}>
+              Free tier: 60 calls/min · No credit card needed
+            </div>
+          </div>
+        )}
+
+        {/* Category filter */}
+        <div style={{display:"flex",gap:5,marginBottom:10,
+          overflowX:"auto",scrollbarWidth:"none"}}>
+          {CATEGORIES.map(c=>(
+            <button key={c} onClick={()=>setCat(c)} style={{
+              background:category===c?"#9944ff22":"#080f1e",
+              border:`1px solid ${category===c?"#9944ff88":"#0d1e32"}`,
+              borderRadius:20,color:category===c?"#cc77ff":"#334466",
+              fontSize:10,padding:"5px 12px",cursor:"pointer",
+              fontFamily:"monospace",flexShrink:0,whiteSpace:"nowrap",
+            }}>{c}</button>
+          ))}
+        </div>
+
+        {/* Instrument filter */}
+        <div style={{display:"flex",gap:5,marginBottom:12,
+          overflowX:"auto",scrollbarWidth:"none"}}>
+          {INSTRUMENTS.map(i=>(
+            <button key={i} onClick={()=>setInst(i)} style={{
+              background:instrument===i?"#00aaff22":"#080f1e",
+              border:`1px solid ${instrument===i?"#00aaff88":"#0d1e32"}`,
+              borderRadius:20,color:instrument===i?"#00aaff":"#334466",
+              fontSize:10,padding:"5px 12px",cursor:"pointer",
+              fontFamily:"monospace",flexShrink:0,whiteSpace:"nowrap",
+            }}>{i}</button>
+          ))}
+        </div>
+
+        {/* Impact filter */}
+        <div style={{display:"flex",gap:5,marginBottom:14}}>
+          {["ALL","HIGH","MEDIUM","LOW"].map(i=>{
+            const col = i==="ALL"?"#aabbdd":IMPACT_COLOR[i];
+            return(
+              <button key={i} onClick={()=>setImpact(i)} style={{
+                background:impact===i?col+"22":"#080f1e",
+                border:`1px solid ${impact===i?col+"66":"#0d1e32"}`,
+                borderRadius:20,color:impact===i?col:"#334466",
+                fontSize:10,padding:"5px 12px",cursor:"pointer",
+                fontFamily:"monospace",transition:"all 0.15s",
+              }}>{i==="ALL"?"ALL IMPACT":`${i} IMPACT`}</button>
+            );
+          })}
+        </div>
+
+        {/* News cards */}
+        {filtered.length===0 && (
+          <div style={{textAlign:"center",padding:"40px",color:"#334466",fontFamily:"monospace",fontSize:12}}>
+            <div style={{fontSize:32,marginBottom:12}}>📰</div>
+            No news matches your filters.
+          </div>
+        )}
+
+        {filtered.map(item => {
+          const isExp = expanded===item.id;
+          const impCol = IMPACT_COLOR[item.impact];
+          const sentCol = SENT_COLOR(item.sentiment);
+          return (
+            <div key={item.id} className="fadein" style={{
+              background:"#080f1e",
+              border:`1px solid ${item.impact==="HIGH"?"#ff446622":"#0d1e32"}`,
+              borderLeft:`3px solid ${impCol}`,
+              borderRadius:8,padding:"14px",marginBottom:10,
+              cursor:"pointer",
+            }} onClick={()=>setExp(isExp?null:item.id)}>
+
+              {/* Top row */}
+              <div style={{display:"flex",justifyContent:"space-between",
+                alignItems:"flex-start",marginBottom:8}}>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{
+                    background:impCol+"18",border:`1px solid ${impCol}44`,
+                    borderRadius:4,padding:"1px 8px",fontSize:9,
+                    color:impCol,fontFamily:"monospace",
+                  }}>{item.impact}</span>
+                  <span style={{fontSize:10,color:"#334466",fontFamily:"monospace"}}>
+                    {item.source}
+                  </span>
+                  <span style={{fontSize:10,color:"#1e3050",fontFamily:"monospace"}}>
+                    {item.time}
+                  </span>
+                </div>
+                <div style={{
+                  fontSize:9,color:sentCol,fontFamily:"monospace",
+                  background:sentCol+"15",border:`1px solid ${sentCol}33`,
+                  borderRadius:4,padding:"1px 8px",flexShrink:0,
+                }}>{item.sentiment}</div>
+              </div>
+
+              {/* Headline */}
+              <div style={{fontSize:14,fontWeight:700,color:"#ddeeff",
+                lineHeight:1.4,marginBottom:8}}>{item.headline}</div>
+
+              {/* Tickers */}
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:isExp?10:0}}>
+                {item.tickers.map(t=>(
+                  <span key={t} style={{
+                    background:"#0a0620",border:"1px solid #1a0a2e",
+                    borderRadius:4,padding:"2px 8px",
+                    fontSize:9,color:"#9944ff",fontFamily:"monospace",
+                  }}>{t}</span>
+                ))}
+                <span style={{fontSize:9,color:"#1e3050",fontFamily:"monospace",
+                  alignSelf:"center",marginLeft:"auto"}}>
+                  {isExp?"▲ Less":"▼ More"}
+                </span>
+              </div>
+
+              {/* Expanded summary */}
+              {isExp && (
+                <div className="fadein">
+                  <div style={{fontSize:13,color:"#667799",lineHeight:1.7,
+                    marginBottom:10,paddingTop:8,
+                    borderTop:"1px solid #0d1e32"}}>{item.summary}</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <span style={{fontSize:10,color:"#334466",fontFamily:"monospace"}}>
+                      Category: <span style={{color:"#cc77ff"}}>{item.category}</span>
+                    </span>
+                    {item.url && item.url !== "#" && (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        style={{marginLeft:"auto",fontSize:10,color:"#9944ff",
+                          fontFamily:"monospace",textDecoration:"none"}}
+                        onClick={e=>e.stopPropagation()}>
+                        Read full article →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* How to get real news guide */}
+        <div style={{background:"#080f1e",border:"1px solid #0d1e32",
+          borderRadius:10,padding:14,marginTop:8}}>
+          <div style={{fontSize:10,color:"#334466",fontFamily:"monospace",
+            letterSpacing:1,marginBottom:10}}>🔗 FREE NEWS API SOURCES</div>
+          {[
+            {name:"Finnhub",    url:"finnhub.io",           what:"Forex, stocks, crypto news",   limit:"60 calls/min free"},
+            {name:"CryptoCompare",url:"cryptocompare.com",  what:"Crypto news only",             limit:"Free tier"},
+            {name:"NewsAPI",    url:"newsapi.org",           what:"General financial news",       limit:"100 calls/day free"},
+            {name:"Alpha Vantage",url:"alphavantage.co",    what:"Market news and sentiment",    limit:"25 calls/day free"},
+          ].map((s,i)=>(
+            <div key={s.name} style={{display:"flex",gap:12,padding:"8px 0",
+              borderBottom:i<3?"1px solid #06101c":"none",alignItems:"center"}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#cc77ff"}}>{s.name}</div>
+                <div style={{fontSize:10,color:"#334466"}}>{s.what}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:9,color:"#9944ff",fontFamily:"monospace"}}>{s.url}</div>
+                <div style={{fontSize:9,color:"#334466",fontFamily:"monospace"}}>{s.limit}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{fontSize:10,color:"#1e3050",fontFamily:"monospace",
+          textAlign:"center",marginTop:16}}>
+          🔮 ORACLE TRADER · ⚠ NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </>
+  );
+}
